@@ -68,7 +68,7 @@ huobi [options] AMOUNT SOURCE [TARGET...]
 - The source currency is always excluded
 - `-u`, `--update` — force-refresh rates, ignoring cache age
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
-  unknown explicit currency) · `2` usage error (missing args, bad amount)
+  unknown source currency) · `2` usage error (missing args, bad amount)
 
 ## Behavior
 
@@ -84,8 +84,12 @@ huobi [options] AMOUNT SOURCE [TARGET...]
 
 - User-facing messages are in English (only the human conversation around the
   repo is Chinese)
-- Unknown currency in an explicit target → fatal error (exit 1);
-  unknown currency in the config list → warn and skip
+- Unknown currency in an explicit target → warn and skip (exit 0); the
+  remaining valid conversions still print. Unknown source currency → fatal
+  (exit 1), since no conversion is possible. Unknown currency in the config
+  list → warn and skip
+- If none of the explicit targets are valid, the multi-currency view is shown
+  as a fallback (same rule as "no targets given")
 - Invalid config values degrade to defaults with a warning, never a crash
 - Currency codes are case-insensitive on input, stored uppercase
 

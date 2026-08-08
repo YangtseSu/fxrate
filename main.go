@@ -328,20 +328,17 @@ func main() {
 		fatal("%v", err)
 	}
 
-	// Explicit targets are mandatory; unknown ones are fatal. Currencies from
-	// the config list are optional and warn-and-skip when unknown.
+	// Unknown target currencies are warned about and skipped, so the
+	// remaining valid conversions still print.
 	type row struct {
 		code string
 		val  float64
 	}
-	convertList := func(list []string, strict bool) []row {
+	convertList := func(list []string) []row {
 		var rows []row
 		for _, t := range list {
 			v, err := convert(snap, src, t, amount)
 			if err != nil {
-				if strict {
-					fatal("%v", err)
-				}
 				fmt.Fprintf(os.Stderr, "warning: %v, skipped\n", err)
 				continue
 			}
@@ -349,12 +346,13 @@ func main() {
 		}
 		return rows
 	}
-	explicitRows := convertList(dedupeTargets(explicit, src), true)
-	// The multi-currency view is always shown when no targets are given;
-	// otherwise it only appears when enabled in the config.
+	explicitRows := convertList(dedupeTargets(explicit, src))
+	// The multi-currency view is always shown when no targets are given
+	// (or none of them are valid); otherwise it only appears when enabled
+	// in the config.
 	var multiRows []row
 	if len(explicitRows) == 0 || cfg.multiView() {
-		multiRows = convertList(dedupeTargets(cfg.Currencies, src), false)
+		multiRows = convertList(dedupeTargets(cfg.Currencies, src))
 	}
 
 	// Output: amounts right-aligned; the explicit section starts with

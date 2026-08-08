@@ -34,7 +34,11 @@ huobi 100 USD EUR CNY      # EUR and CNY first; with multi_view on, the
 huobi -u 100 USD           # force-refresh rates, then convert
 ```
 
-Output shows the converted amounts and the rates date. Notices and warnings go to stderr. Exit codes: `0` success, `1` runtime error (e.g. fetch failed with no cache, unknown currency), `2` usage error.
+Output shows the converted amounts and the rates date. Currencies without
+rate data are reported on stderr and skipped; the valid conversions still
+print. Notices and warnings go to stderr. Exit codes: `0` success, `1` runtime
+error (e.g. fetch failed with no cache, unknown source currency), `2` usage
+error.
 
 ## Configuration
 
