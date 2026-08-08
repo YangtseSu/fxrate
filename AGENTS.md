@@ -40,12 +40,17 @@ the spec below describes the current behavior, not a wishlist.
 ```json
 {
   "update_interval": "24h",
+  "multi_view": true,
   "currencies": ["USD", "EUR", "GBP", "JPY", "CNY", ...]
 }
 ```
 
 - `update_interval`: Go duration string; auto-refresh threshold (default `24h`).
   Invalid values warn and fall back to 24h
+- `multi_view`: whether the default multi-currency list is appended after
+  explicit targets. Default `true`; an absent field also means enabled
+  (backwards compatible). When no targets are given at all, the
+  multi-currency view is always shown regardless of this setting
 - `currencies`: default multi-currency view list. Note: Frankfurter no longer
   serves BGN — don't add it. Valid codes come from `GET /v2/currencies`
 
@@ -55,9 +60,12 @@ the spec below describes the current behavior, not a wishlist.
 huobi [options] AMOUNT SOURCE [TARGET...]
 ```
 
-- No targets → **multi-currency view** over the config `currencies` list
-- Explicit targets are shown **first** (deduped, order preserved), followed by
-  the default list; the source currency is always excluded
+- No targets → **multi-currency view** over the config `currencies` list,
+  always shown regardless of `multi_view`
+- With targets: explicit targets are shown first (deduped, order preserved).
+  When `multi_view` is enabled, the default list follows, separated by a blank
+  line and a rule; when disabled, only the explicit targets are shown
+- The source currency is always excluded
 - `-u`, `--update` — force-refresh rates, ignoring cache age
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
   unknown explicit currency) · `2` usage error (missing args, bad amount)

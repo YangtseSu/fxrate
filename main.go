@@ -49,11 +49,16 @@ type Config struct {
 	// Currencies is the default multi-currency view list, shown when no
 	// target currencies are given explicitly.
 	Currencies []string `json:"currencies"`
+	// MultiView controls whether the default multi-currency list is shown
+	// after explicit targets. When no targets are given at all, the
+	// multi-currency view is always shown regardless of this setting.
+	MultiView *bool `json:"multi_view"`
 }
 
 func defaultConfig() *Config {
 	return &Config{
 		UpdateInterval: "24h",
+		MultiView:      new(true),
 		Currencies: []string{
 			"USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CHF", "AUD", "CAD", "SGD",
 			"SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "RON", "KRW", "INR",
@@ -220,20 +225,18 @@ func convert(s *RateSnapshot, src, dst string, amount float64) (float64, error) 
 	return amount * rd / rs, nil
 }
 
-// buildTargets assembles the display list: explicitly specified currencies
-// (deduped, order preserved) come first, followed by the configured default
-// multi-currency list; the source currency is always excluded.
-func buildTargets(explicit []string, cfg *Config, src string) []string {
+// multiView reports whether the default multi-currency list is appended
+// after explicit targets. An absent config field (nil) means enabled.
+func (c *Config) multiView() bool {
+	return c.MultiView == nil || *c.MultiView
+}
+
+// dedupeTargets returns the given currencies deduped and in order,
+// excluding the source currency.
+func dedupeTargets(currencies []string, src string) []string {
 	var out []string
 	seen := map[string]bool{src: true}
-	for _, c := range explicit {
-		c = strings.ToUpper(c)
-		if !seen[c] {
-			seen[c] = true
-			out = append(out, c)
-		}
-	}
-	for _, c := range cfg.Currencies {
+	for _, c := range currencies {
 		c = strings.ToUpper(c)
 		if !seen[c] {
 			seen[c] = true
@@ -325,40 +328,71 @@ func main() {
 		fatal("%v", err)
 	}
 
-	// Filter unknown currencies: explicit targets fail, config-list entries warn and skip.
-	targets := buildTargets(explicit, cfg, src)
+	// Explicit targets are mandatory; unknown ones are fatal. Currencies from
+	// the config list are optional and warn-and-skip when unknown.
 	type row struct {
 		code string
 		val  float64
 	}
-	var rows []row
-	for i, t := range targets {
-		v, err := convert(snap, src, t, amount)
-		if err != nil {
-			if i < len(explicit) {
-				fatal("%v", err)
+	convertList := func(list []string, strict bool) []row {
+		var rows []row
+		for _, t := range list {
+			v, err := convert(snap, src, t, amount)
+			if err != nil {
+				if strict {
+					fatal("%v", err)
+				}
+				fmt.Fprintf(os.Stderr, "warning: %v, skipped\n", err)
+				continue
 			}
-			fmt.Fprintf(os.Stderr, "warning: %v, skipped\n", err)
-			continue
+			rows = append(rows, row{t, v})
 		}
-		rows = append(rows, row{t, v})
+		return rows
+	}
+	explicitRows := convertList(dedupeTargets(explicit, src), true)
+	// The multi-currency view is always shown when no targets are given;
+	// otherwise it only appears when enabled in the config.
+	var multiRows []row
+	if len(explicitRows) == 0 || cfg.multiView() {
+		multiRows = convertList(dedupeTargets(cfg.Currencies, src), false)
 	}
 
-	// Output: amounts right-aligned, continuation lines indented to first-line width.
+	// Output: amounts right-aligned; the explicit section starts with
+	// "AMOUNT SRC =", the multi-currency section is separated by a blank
+	// line and a rule, with its rows indented to the same column.
 	amountStr := fmt.Sprintf("%.2f", amount)
 	pad := len(amountStr) + len(src) + 3 // width of the "100.00 USD = " prefix
 	valW := 0
-	for _, r := range rows {
+	for _, r := range explicitRows {
 		if w := len(fmt.Sprintf("%.2f", r.val)); w > valW {
 			valW = w
 		}
 	}
-	for i, r := range rows {
-		vstr := fmt.Sprintf("%*s", valW, fmt.Sprintf("%.2f", r.val))
+	for _, r := range multiRows {
+		if w := len(fmt.Sprintf("%.2f", r.val)); w > valW {
+			valW = w
+		}
+	}
+	vstr := func(r row) string { return fmt.Sprintf("%*s", valW, fmt.Sprintf("%.2f", r.val)) }
+	indent := strings.Repeat(" ", pad)
+	for i, r := range explicitRows {
 		if i == 0 {
-			fmt.Printf("%s %s = %s %s\n", amountStr, src, vstr, r.code)
+			fmt.Printf("%s %s = %s %s\n", amountStr, src, vstr(r), r.code)
 		} else {
-			fmt.Printf("%s%s %s\n", strings.Repeat(" ", pad), vstr, r.code)
+			fmt.Printf("%s%s %s\n", indent, vstr(r), r.code)
+		}
+	}
+	if len(multiRows) > 0 {
+		if len(explicitRows) > 0 {
+			fmt.Println()
+			fmt.Println(strings.Repeat("-", pad+valW+4))
+		}
+		for i, r := range multiRows {
+			if i == 0 && len(explicitRows) == 0 {
+				fmt.Printf("%s %s = %s %s\n", amountStr, src, vstr(r), r.code)
+			} else {
+				fmt.Printf("%s%s %s\n", indent, vstr(r), r.code)
+			}
 		}
 	}
 	fmt.Printf("rates date %s\n", snap.Date)
