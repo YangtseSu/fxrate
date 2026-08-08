@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Yangtse Su
+//
 // Command huobi is an offline currency conversion CLI.
 //
 // Rates come from the Frankfurter API (https://frankfurter.dev) and are
