@@ -19,6 +19,9 @@ Requires Go 1.26+ (standard library only, no dependencies).
 go build -o huobi .
 ```
 
+Arch Linux: build and install from the bundled `PKGBUILD` with `makepkg -si`
+in the repo root.
+
 ## Usage
 
 ```
