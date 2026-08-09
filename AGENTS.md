@@ -98,6 +98,38 @@ huobi [options] AMOUNT SOURCE [TARGET...]
 - Invalid config values degrade to defaults with a warning, never a crash
 - Currency codes are case-insensitive on input, stored uppercase
 
+## Releasing
+
+Release flow (used for v0.1.0 and v0.1.1):
+
+1. **Tag first, PKGBUILD after.** The tag points at the last code commit on
+   main; the PKGBUILD bump is a follow-up commit. This order is required: the
+   PKGBUILD's `source` is GitHub's archive of the tag, so its sha256 can only
+   be computed after the tag exists
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` — pushing a `v*` tag triggers
+   `.github/workflows/release.yml`, which builds the four platform binaries
+   and creates a GitHub release with auto-generated notes
+3. Download the tag archive and compute the checksum:
+   `curl -fsSLo /tmp/huobi.tar.gz https://github.com/YangtseSu/huobi/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/huobi.tar.gz`
+   — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD
+   downloads from GitHub)
+4. Update `PKGBUILD`:
+   - `pkgver=X.Y.Z`, `pkgrel=1` (resets to 1 on every new version)
+   - `sha256sums=('<new hash>')` — single entry, replaced in full
+   - Leave everything else (pkgname, arch, source URL pattern, build/check/
+     package functions) untouched
+5. Verify with makepkg in a scratch dir: `makepkg -o` (checksum check), then
+   a full `makepkg` build to exercise `build`/`check`/`package` and confirm
+   the produced `.pkg.tar.zst` contains `/usr/bin/huobi` and the LICENSE
+6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
+
+The PKGBUILD lives only on main, never in the tagged tree (the v0.1.0 tag
+predates it; the v0.1.1 tag points at the commit before the bump). Key
+fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
+`makedepends=('go')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`,
+`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"` with `go vet` as the
+check step.
+
 ## Testing notes
 
 - Offline paths: seed a handcrafted `rates.json` (set `fetched_at` to a stale
