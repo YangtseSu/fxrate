@@ -393,7 +393,6 @@ func main() {
 	}
 	if len(multiRows) > 0 {
 		if len(explicitRows) > 0 {
-			fmt.Println()
 			fmt.Println(strings.Repeat("-", pad+valW+4))
 		}
 		for i, r := range multiRows {
