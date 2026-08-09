@@ -360,7 +360,9 @@ func main() {
 	// "AMOUNT SRC =", the multi-currency section is separated by a blank
 	// line and a rule, with its rows indented to the same column.
 	amountStr := fmt.Sprintf("%.2f", amount)
-	pad := len(amountStr) + len(src) + 3 // width of the "100.00 USD = " prefix
+	// Width of the "100.00 USD = " prefix on the first line: amount, space,
+	// source, space, "=", space. Continuation lines indent to the same column.
+	pad := len(amountStr) + len(src) + 4
 	valW := 0
 	for _, r := range explicitRows {
 		if w := len(fmt.Sprintf("%.2f", r.val)); w > valW {
