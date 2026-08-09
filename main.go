@@ -306,6 +306,7 @@ func main() {
 	}
 
 	// Refresh when the cache is missing or stale; fall back to the cache on failure.
+	updated := false
 	if *force || snap == nil || time.Since(snap.FetchedAt) > interval {
 		fresh, ferr := fetchRates()
 		switch {
@@ -314,7 +315,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "warning: failed to save rates cache: %v\n", serr)
 			}
 			snap = fresh
-			fmt.Fprintf(os.Stderr, "rates updated: %s\n", fresh.Date)
+			updated = true
 		case *force:
 			fatal("failed to update rates: %v", ferr)
 		case snap == nil:
@@ -393,5 +394,11 @@ func main() {
 			}
 		}
 	}
-	fmt.Printf("rates date %s\n", snap.Date)
+	// Footer: when rates were refreshed this run, the update status and the
+	// rate date are shown in one line; otherwise just the rate date.
+	if updated {
+		fmt.Printf("rates updated: %s\n", snap.Date)
+	} else {
+		fmt.Printf("rates date %s\n", snap.Date)
+	}
 }

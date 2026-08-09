@@ -77,8 +77,12 @@ huobi [options] AMOUNT SOURCE [TARGET...]
   failure reason and the last rate date, and continue. Exit 1 only when there
   is no cache at all and the fetch fails
 - Force-update failure always exits 1
-- stdout: the conversion table plus a `汇率日期 <date>` footer line
-- stderr: notices and warnings (update status, skipped currencies, invalid config)
+- stdout: the conversion table plus a footer line with the rate date —
+  `汇率日期 <date>`. When rates were refreshed during the run, the footer is
+  `rates updated: <date>` instead, so the update status and the date appear
+  only once, at the bottom
+- stderr: notices and warnings (skipped currencies, invalid config, failed
+  refresh fallback)
 
 ## Conventions
 
