@@ -232,10 +232,13 @@ func (c *Config) multiView() bool {
 }
 
 // dedupeTargets returns the given currencies deduped and in order,
-// excluding the source currency.
-func dedupeTargets(currencies []string, src string) []string {
+// excluding the source currency and any additional excluded currencies.
+func dedupeTargets(currencies []string, src string, exclude ...string) []string {
 	var out []string
 	seen := map[string]bool{src: true}
+	for _, e := range exclude {
+		seen[strings.ToUpper(e)] = true
+	}
 	for _, c := range currencies {
 		c = strings.ToUpper(c)
 		if !seen[c] {
@@ -350,10 +353,15 @@ func main() {
 	explicitRows := convertList(dedupeTargets(explicit, src))
 	// The multi-currency view is always shown when no targets are given
 	// (or none of them are valid); otherwise it only appears when enabled
-	// in the config.
+	// in the config. Currencies already shown as explicit targets are not
+	// repeated in the multi-currency section.
 	var multiRows []row
 	if len(explicitRows) == 0 || cfg.multiView() {
-		multiRows = convertList(dedupeTargets(cfg.Currencies, src))
+		excl := make([]string, 0, len(explicitRows))
+		for _, r := range explicitRows {
+			excl = append(excl, r.code)
+		}
+		multiRows = convertList(dedupeTargets(cfg.Currencies, src, excl...))
 	}
 
 	// Output: amounts right-aligned; the explicit section starts with

@@ -64,7 +64,9 @@ huobi [options] AMOUNT SOURCE [TARGET...]
   always shown regardless of `multi_view`
 - With targets: explicit targets are shown first (deduped, order preserved).
   When `multi_view` is enabled, the default list follows, separated by a blank
-  line and a rule; when disabled, only the explicit targets are shown
+  line and a rule; when disabled, only the explicit targets are shown.
+  Currencies already shown as explicit targets are not repeated in the
+  default list
 - The source currency is always excluded
 - `-u`, `--update` — force-refresh rates, ignoring cache age
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
