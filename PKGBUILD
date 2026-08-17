@@ -14,7 +14,10 @@ sha256sums=('7211aa44f510ebbe0ddd60ea3ab2f6c4bd799448ef683ccf64bd0df81064e8af')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
-  cargo build --release --locked
+  # ring's bundled C/assembly does not link with Arch's global LTO flag.
+  CFLAGS="${CFLAGS//-flto=auto/}" \
+    CXXFLAGS="${CXXFLAGS//-flto=auto/}" \
+    cargo build --release --locked
 }
 
 check() {
