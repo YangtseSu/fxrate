@@ -9,38 +9,64 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: linux
             arch: amd64
+            runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: huobi
           - os: linux
             arch: arm64
+            runner: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             binary: huobi
           - os: darwin
             arch: arm64
+            runner: macos-14
             target: aarch64-apple-darwin
             binary: huobi
           - os: windows
             arch: amd64
-            target: x86_64-pc-windows-gnu
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
             binary: huobi.exe
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.os != 'linux' || matrix.arch == 'amd64'
+        with:
+          targets: ${{ matrix.target }}
+
       - uses: houseabsolute/actions-rust-cross@v0
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
         with:
           command: build
           target: ${{ matrix.target }}
           args: --locked --release
           strip: true
 
-      - name: Stage binary
-        run: cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.binary == 'huobi.exe' && '.exe' || '' }}"
+      - name: Build native target
+        if: matrix.os != 'linux' || matrix.arch == 'amd64'
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Stage Unix binary
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}"
+
+      - name: Stage Windows binary
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}.exe"
 
       - uses: actions/upload-artifact@v4
         with:
