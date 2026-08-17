@@ -1,16 +1,16 @@
 # Project: huobi — Offline Currency Converter CLI
 
-A single-file offline currency conversion command-line tool.
+A Rust offline currency conversion command-line tool.
 
 ## Status
 
-Fully implemented and committed. All originally planned features are done;
-the spec below describes the current behavior, not a wishlist.
+Fully implemented and committed; the spec below describes the current behavior.
 
 ## Tech stack
 
-- Go 1.26, **standard library only** (no external deps). Build: `go build -o huobi .`
-- Single source file: `main.go` (package `main`, module `huobi`)
+- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, and `chrono`
+- Source: `src/main.rs`; manifest: `Cargo.toml`
+- Build: `cargo build --release`
 - Repo is git-managed; the built binary `/huobi` is gitignored
 
 ## Data source
@@ -45,7 +45,7 @@ the spec below describes the current behavior, not a wishlist.
 }
 ```
 
-- `update_interval`: Go duration string; auto-refresh threshold (default `24h`).
+- `update_interval`: duration string such as `24h` or `1h30m`; auto-refresh threshold (default `24h`).
   Invalid values warn and fall back to 24h
 - `multi_view`: whether the default multi-currency list is appended after
   explicit targets. Default `true`; an absent field also means enabled
@@ -79,7 +79,7 @@ huobi [options] AMOUNT SOURCE [TARGET...]
   is no cache at all and the fetch fails
 - Force-update failure always exits 1
 - stdout: the conversion table plus a footer line with the rate date —
-  `汇率日期 <date>`. When rates were refreshed during the run, the footer is
+  `rates date <date>`. When rates were refreshed during the run, the footer is
   `rates updated: <date>` instead, so the update status and the date appear
   only once, at the bottom
 - stderr: notices and warnings (skipped currencies, invalid config, failed
@@ -123,12 +123,10 @@ Release flow (used for v0.1.0 and v0.1.1):
    the produced `.pkg.tar.zst` contains `/usr/bin/huobi` and the LICENSE
 6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
 
-The PKGBUILD lives only on main, never in the tagged tree (the v0.1.0 tag
-predates it; the v0.1.1 tag points at the commit before the bump). Key
-fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
-`makedepends=('go')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`,
-`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"` with `go vet` as the
-check step.
+The PKGBUILD lives only on main, never in the tagged tree. Key fields:
+`arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
+`makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`,
+`cargo build --release --locked` with `cargo test --locked` as the check step.
 
 ## Testing notes
 

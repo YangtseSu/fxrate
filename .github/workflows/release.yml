@@ -15,26 +15,32 @@ jobs:
         include:
           - os: linux
             arch: amd64
+            target: x86_64-unknown-linux-gnu
+            binary: huobi
           - os: linux
             arch: arm64
+            target: aarch64-unknown-linux-gnu
+            binary: huobi
           - os: darwin
             arch: arm64
+            target: aarch64-apple-darwin
+            binary: huobi
           - os: windows
             arch: amd64
+            target: x86_64-pc-windows-gnu
+            binary: huobi.exe
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: houseabsolute/actions-rust-cross@v0
         with:
-          go-version: '1.26.x'
+          command: build
+          target: ${{ matrix.target }}
+          args: --locked --release
+          strip: true
 
-      - name: Build
-        run: |
-          ext=""
-          [ "${{ matrix.os }}" = "windows" ] && ext=".exe"
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-            go build -trimpath -ldflags="-s -w" \
-            -o "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}$ext" .
+      - name: Stage binary
+        run: cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.binary == 'huobi.exe' && '.exe' || '' }}"
 
       - uses: actions/upload-artifact@v4
         with:

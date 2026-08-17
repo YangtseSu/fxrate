@@ -11,24 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.26.x'
+          toolchain: stable
+          components: rustfmt, clippy
 
       - name: Check formatting
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "Unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
+        run: cargo fmt --all -- --check
 
-      - name: Vet
-        run: go vet ./...
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build
-        run: go build -o huobi .
+        run: cargo build --release --locked
 
       - name: Test
-        run: go test ./...
+        run: cargo test --locked
