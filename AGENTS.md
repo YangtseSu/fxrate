@@ -113,18 +113,19 @@ Release flow (used for v0.1.0 and v0.1.1):
    `curl -fsSLo /tmp/huobi.tar.gz https://github.com/YangtseSu/huobi/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/huobi.tar.gz`
    — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD
    downloads from GitHub)
-4. Update `PKGBUILD`:
+4. Update `packaging/arch/PKGBUILD`:
    - `pkgver=X.Y.Z`, `pkgrel=1` (resets to 1 on every new version)
    - `sha256sums=('<new hash>')` — single entry, replaced in full
    - Leave everything else (pkgname, arch, source URL pattern, build/check/
      package functions) untouched
-5. Verify with makepkg in a scratch dir: `makepkg -o` (checksum check), then
-   a full `makepkg` build to exercise `build`/`check`/`package` and confirm
-   the produced `.pkg.tar.zst` contains `/usr/bin/huobi` and the LICENSE
+5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum
+   check), then a full `makepkg` build to exercise `build`/`check`/`package`
+   and confirm the produced `.pkg.tar.zst` contains `/usr/bin/huobi` and the
+   LICENSE
 6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
 
-The PKGBUILD lives only on main, never in the tagged tree. Key fields:
-`arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
+The PKGBUILD lives at `packaging/arch/` on main, never in the tagged tree.
+Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
 `makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`,
 `cargo build --release --locked` with `cargo test --locked` as the check step.
 

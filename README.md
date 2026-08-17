@@ -19,7 +19,12 @@ cargo build --release
 ```
 
 The binary is `target/release/huobi`. Arch Linux users can build and install
-from the bundled `PKGBUILD` with `makepkg -si` in the repo root.
+from `packaging/arch/`:
+
+```sh
+cd packaging/arch
+makepkg -si
+```
 
 ## Usage
 
