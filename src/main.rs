@@ -93,6 +93,8 @@ struct RateSnapshot {
     base: String,
     date: String,
     fetched_at: DateTime<Utc>,
+    #[serde(default)]
+    provider: String,
     rates: std::collections::HashMap<String, f64>,
 }
 
@@ -219,6 +221,7 @@ fn fetch_frankfurter_rates() -> Result<RateSnapshot, Box<dyn Error>> {
         base,
         date,
         fetched_at: Utc::now(),
+        provider: String::new(),
         rates,
     })
 }
@@ -248,6 +251,7 @@ fn parse_exchange_api(bytes: &[u8]) -> Result<RateSnapshot, Box<dyn Error>> {
         base: "EUR".to_owned(),
         date,
         fetched_at: Utc::now(),
+        provider: String::new(),
         rates,
     })
 }
@@ -265,10 +269,12 @@ fn fetch_exchange_api_rates() -> Result<RateSnapshot, Box<dyn Error>> {
 }
 
 fn fetch_rates(provider: Provider) -> Result<RateSnapshot, Box<dyn Error>> {
-    match provider {
+    let mut snapshot = match provider {
         Provider::Frankfurter => fetch_frankfurter_rates(),
         Provider::ExchangeApi => fetch_exchange_api_rates(),
-    }
+    }?;
+    snapshot.provider = provider.name().to_owned();
+    Ok(snapshot)
 }
 
 fn currency_rate(snapshot: &RateSnapshot, currency: &str) -> Result<f64, Box<dyn Error>> {
@@ -323,10 +329,25 @@ fn parse_duration(value: &str) -> Option<Duration> {
         rest = &rest[unit.len()..];
     }
     if total.is_finite() && total > 0.0 {
-        Some(Duration::from_secs_f64(total))
+        Duration::try_from_secs_f64(total).ok()
     } else {
         None
     }
+}
+
+fn cache_needs_refresh(
+    snapshot: Option<&RateSnapshot>,
+    provider: Provider,
+    interval: Duration,
+) -> bool {
+    snapshot.is_none_or(|snapshot| {
+        snapshot.provider != provider.name()
+            || Utc::now()
+                .signed_duration_since(snapshot.fetched_at)
+                .to_std()
+                .map(|age| age > interval)
+                .unwrap_or(false)
+    })
 }
 
 fn dedupe_targets(currencies: &[String], source: &str, exclude: &[String]) -> Vec<String> {
@@ -383,7 +404,7 @@ fn parse_args() -> Result<Args, i32> {
                 usage();
                 return Err(0);
             }
-            _ if arg.starts_with('-') && positional.is_empty() => {
+            _ if arg.starts_with('-') => {
                 eprintln!("error: unknown option {arg}");
                 usage();
                 return Err(2);
@@ -411,6 +432,11 @@ fn parse_args() -> Result<Args, i32> {
         eprintln!("error: invalid amount {:?}", positional[0]);
         2
     })?;
+    if !amount.is_finite() {
+        eprintln!("error: amount must be finite");
+        usage();
+        return Err(2);
+    }
     let source = positional[1].to_uppercase();
     let targets = positional[2..]
         .iter()
@@ -479,13 +505,7 @@ fn main() {
             None
         }
     };
-    let stale = snapshot.as_ref().is_none_or(|snapshot| {
-        Utc::now()
-            .signed_duration_since(snapshot.fetched_at)
-            .to_std()
-            .map(|age| age > interval)
-            .unwrap_or(false)
-    });
+    let stale = cache_needs_refresh(snapshot.as_ref(), provider, interval);
     let mut updated = false;
     if force || stale {
         match fetch_rates(provider) {
@@ -502,8 +522,13 @@ fn main() {
             }
             Err(error) => {
                 let cached = snapshot.as_ref().expect("cache exists in fallback branch");
+                let cached_provider = if cached.provider.is_empty() {
+                    "unknown"
+                } else {
+                    cached.provider.as_str()
+                };
                 eprintln!(
-                    "warning: failed to update rates: {error}; using cached rates (date {})",
+                    "warning: failed to update rates: {error}; using cached rates (date {}, provider {cached_provider})",
                     cached.date
                 );
             }
@@ -596,6 +621,41 @@ mod tests {
         assert_eq!(parse_duration("24h"), Some(Duration::from_secs(86400)));
         assert_eq!(parse_duration("0s"), None);
         assert_eq!(parse_duration("tomorrow"), None);
+    }
+    #[test]
+    fn cache_refreshes_when_provider_changes() {
+        let snapshot = RateSnapshot {
+            base: "EUR".to_owned(),
+            date: "2026-08-17".to_owned(),
+            fetched_at: Utc::now(),
+            provider: "frankfurter".to_owned(),
+            rates: std::collections::HashMap::new(),
+        };
+        let interval = Duration::from_secs(3600);
+
+        assert!(!cache_needs_refresh(
+            Some(&snapshot),
+            Provider::Frankfurter,
+            interval
+        ));
+        assert!(cache_needs_refresh(
+            Some(&snapshot),
+            Provider::ExchangeApi,
+            interval
+        ));
+
+        let mut legacy = snapshot;
+        legacy.provider.clear();
+        assert!(cache_needs_refresh(
+            Some(&legacy),
+            Provider::Frankfurter,
+            interval
+        ));
+    }
+
+    #[test]
+    fn duration_parser_rejects_out_of_range_values() {
+        assert!(parse_duration("999999999999999999999h").is_none());
     }
 
     #[test]
