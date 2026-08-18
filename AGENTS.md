@@ -15,12 +15,26 @@ Fully implemented and committed; the spec below describes the current behavior.
 
 ## Data source
 
+Two rate providers, selected with `-p/--provider` or the `provider` config
+key; `frankfurter` (the default) and `exchange-api`.
+
 - Frankfurter API v2: `GET https://api.frankfurter.dev/v2/rates?base=EUR`
-- Response is a JSON **array** of rows: `[{"date","base","quote","rate"}, ...]`
-  (~164 currencies; the base currency itself is not in the list)
-- The full snapshot is cached locally. All conversions are computed offline from
-  the base-EUR snapshot: `amount * rate[dst] / rate[src]` — no per-run network
-  calls needed once cached
+- exchange-api (fawazahmed0/exchange-api):
+  `GET https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.min.json`,
+  falling back to `https://latest.currency-api.pages.dev/v1/currencies/eur.min.json`
+  if the primary endpoint fails (the project's recommended fallback setup)
+
+Frankfurter responds with a JSON **array** of rows:
+`[{"date","base","quote","rate"}, ...]` (~164 currencies; the base currency
+itself is not in the list). exchange-api responds with a single JSON object:
+`{"date", "eur": {"usd": ..., "jpy": ..., ...}}` (200+ currencies including
+crypto and metals; base currency is included).
+
+Both quote rates as units of the target currency per 1 EUR, so the cached
+snapshot has the same shape either way. The full snapshot is cached locally.
+All conversions are computed offline from the base-EUR snapshot:
+`amount * rate[dst] / rate[src]` — no per-run network calls needed once cached
+
 - `date` = the rates' business date (from the API); `fetched_at` = local fetch
   time; both are stored in the cache
 
@@ -40,6 +54,7 @@ Fully implemented and committed; the spec below describes the current behavior.
 ```json
 {
   "update_interval": "24h",
+  "provider": "frankfurter",
   "multi_view": true,
   "currencies": ["USD", "EUR", "GBP", "JPY", "CNY", ...]
 }
@@ -47,6 +62,9 @@ Fully implemented and committed; the spec below describes the current behavior.
 
 - `update_interval`: duration string such as `24h` or `1h30m`; auto-refresh threshold (default `24h`).
   Invalid values warn and fall back to 24h
+- `provider`: rates source, `frankfurter` (default) or `exchange-api`. Invalid
+  values warn and fall back to frankfurter; the CLI `-p/--provider` overrides
+  the config value
 - `multi_view`: whether the default multi-currency list is appended after
   explicit targets. Default `true`; an absent field also means enabled
   (backwards compatible). When no targets are given at all, the
@@ -68,6 +86,8 @@ huobi [options] AMOUNT SOURCE [TARGET...]
   already shown as explicit targets are not repeated in the default list
 - The source currency is always excluded
 - `-u`, `--update` — force-refresh rates, ignoring cache age
+- `-p`, `--provider <name>` — rates source override: `frankfurter` (default) or
+  `exchange-api`. Unknown values are a usage error (exit 2)
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
   unknown source currency) · `2` usage error (missing args, bad amount)
 
