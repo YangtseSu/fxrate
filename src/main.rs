@@ -355,7 +355,15 @@ Options:
     );
 }
 
-fn parse_args() -> Result<(bool, Option<String>, f64, String, Vec<String>), i32> {
+struct Args {
+    force: bool,
+    provider: Option<String>,
+    amount: f64,
+    source: String,
+    targets: Vec<String>,
+}
+
+fn parse_args() -> Result<Args, i32> {
     let mut force = false;
     let mut provider = None;
     let mut positional = Vec::new();
@@ -408,7 +416,13 @@ fn parse_args() -> Result<(bool, Option<String>, f64, String, Vec<String>), i32>
         .iter()
         .map(|target| target.to_uppercase())
         .collect();
-    Ok((force, provider, amount, source, targets))
+    Ok(Args {
+        force,
+        provider,
+        amount,
+        source,
+        targets,
+    })
 }
 
 struct Row {
@@ -417,7 +431,13 @@ struct Row {
 }
 
 fn main() {
-    let (force, cli_provider, amount, source, explicit) = match parse_args() {
+    let Args {
+        force,
+        provider: cli_provider,
+        amount,
+        source,
+        targets: explicit,
+    } = match parse_args() {
         Ok(args) => args,
         Err(code) => process::exit(code),
     };
@@ -613,8 +633,7 @@ mod tests {
 
     #[test]
     fn exchange_api_payload_is_parsed() {
-        let payload =
-            br#"{"date":"2026-08-17","eur":{"usd":1.17,"jpy":190.5,"eur":1.0}}"#;
+        let payload = br#"{"date":"2026-08-17","eur":{"usd":1.17,"jpy":190.5,"eur":1.0}}"#;
         let snapshot = parse_exchange_api(payload).unwrap();
         assert_eq!(snapshot.base, "EUR");
         assert_eq!(snapshot.date, "2026-08-17");
