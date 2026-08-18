@@ -1,18 +1,14 @@
 # huobi
 
-Offline currency conversion CLI. Rates are fetched from a configurable
-provider — the [Frankfurter API](https://frankfurter.dev) (v2) by default, or
-[fawazahmed0/exchange-api](https://github.com/fawazahmed0/exchange-api) — and
-cached locally, so conversions work fully offline once a snapshot is
-available.
+Offline currency conversion CLI with local rate caching, so conversions
+continue to work without network access once rates are available.
 
 ## Features
 
-- Offline conversion from a locally cached rates snapshot (~164 currencies)
+- Offline conversion from a locally cached rates snapshot
 - Automatic refresh when the cache is older than a configurable interval (default 24h); a failed refresh falls back to the stale cache with a notice and the last rates date
 - `-u` / `--update` to force a refresh
-- `-p` / `--provider <name>` to choose the rates source: `frankfurter`
-  (default) or `exchange-api` (~200+ currencies, incl. crypto and metals)
+- `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
 - XDG-compliant config and cache locations
 
@@ -21,7 +17,7 @@ available.
 Requires Rust and Cargo.
 
 ```sh
-cargo build --release
+cargo build --release --locked
 ```
 
 The binary is `target/release/huobi`. Arch Linux users can build and install
@@ -71,13 +67,25 @@ Config file: `$XDG_CONFIG_HOME/huobi/config.json` (default
 - `update_interval`: duration string such as `24h` or `1h30m` (default `24h`)
 - `provider`: rates source, `frankfurter` (default) or `exchange-api`. Invalid
   values warn and fall back to `frankfurter`; the CLI `-p` / `--provider`
-  overrides the config value
+  overrides the config value. Changing provider triggers an immediate refresh
 - `multi_view`: show the default list after explicit targets (default `true`).
   With no targets, the multi-currency view is always shown
 - `currencies`: default multi-currency view list
 
 Rates cache: `$XDG_DATA_HOME/huobi/rates.json` (default
 `~/.local/share/huobi/rates.json`), written atomically.
+
+## Rate providers
+
+Rates are fetched from one of two providers:
+
+- **Frankfurter** (default): `GET https://api.frankfurter.dev/v2/rates?base=EUR`
+- **exchange-api**: primary endpoint
+  `GET https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.min.json`,
+  with `https://latest.currency-api.pages.dev/v1/currencies/eur.min.json` as
+  fallback
+
+Available currencies depend on the selected provider and may change.
 
 ## License
 
