@@ -22,7 +22,7 @@ build() {
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"
-  # Bundled C code (ring, SQLite, FreeType) does not link in debug/test
+  # Bundled C code (ring, SQLite) does not link in debug/test
   # builds with Arch's global LTO flag; same treatment as build().
   CFLAGS="${CFLAGS//-flto=auto/}" \
     CXXFLAGS="${CXXFLAGS//-flto=auto/}" \

@@ -14,17 +14,13 @@ source and tests when changing this document.
 ## Tech stack
 
 - Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`,
-  `chrono`, `rusqlite` (bundled), `csv`, `zip`, `plotters`
-  (`bitmap_backend` + `ttf`), `viuer` (`icy_sixel`), `image`, and `libc`
+  `chrono`, `rusqlite` (bundled), `csv`, `zip`, `textplots`, and `libc`
 - Source: `src/`; manifest: `Cargo.toml`
 - Build: `cargo build --release --locked`
 - Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
 - Cargo build artifact: `target/release/huobi`; Cargo's `target/` directory is gitignored
 - `rusqlite` bundled compiles C code, so the build needs a C compiler
-  (already required by the `ring` dependency). Chart labels use an
-  embedded subset of DejaVu Sans (`assets/DejaVuSans-subset.ttf`, license
-  in `assets/DejaVuSans-LICENSE.txt`), so there is no system font or
-  fontconfig dependency at build or run time
+  (already required by the `ring` dependency)
 
 ## Data source
 
@@ -144,28 +140,21 @@ rates; the convert command and its providers are unaffected).
 - `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds
   (default: earliest/latest available data). Invalid dates or `from > to`
   are usage errors (exit 2)
-- `--format <csv|json|png|auto>` — `auto` (default): PNG when stdout is a
-  terminal (or when `--output` is given), CSV otherwise. `csv`/`json` emit
-  text (`date,rate` rows / `{source, target, points}`); `png` emits raw PNG
-  bytes to stdout
-- `--output <path>` — write the output to a file (never emits terminal
-  escape sequences); with `auto` the file gets the PNG chart
-- `--protocol <auto|kitty|sixel|text>` — terminal image protocol. `auto`
-  detects: TTY check, then `KITTY_WINDOW_ID`/`TERM=xterm-kitty`, then a
-  sixel TERM list (xterm, foot, wezterm, mlterm, contour, vt340/vt330),
-  else text. Forced kitty/sixel without a matching environment hint warns
-  and falls back to text (viuer's own probes are interactive and would
-  hang on terminals that do not answer). `--format png` on a TTY with a
-  text protocol also renders the text chart
+- `--format <csv|json|text|auto>` — `auto` (default): text chart when
+  stdout is a terminal (or when `--output` is given), CSV otherwise.
+  `csv`/`json` emit text (`date,rate` rows / `{source, target, points}`);
+  `text` emits the text chart
+- `--output <path>` — write the chart to a file instead of stdout
+  (never emits terminal escape sequences); with `auto` the file gets the
+  text chart
 - `-p`, `--provider <name>` — `ecb` only (default); anything else is a
   usage error (exit 2)
 - Single trading day → prints `1 SOURCE = x TARGET (date)` instead of a
   chart; an empty range (e.g. a weekend with no data) is a runtime error
   (exit 1); unknown currencies are runtime errors (exit 1)
-- Terminal charts: PNG is rendered with plotters at
-  `cols × 8` by `rows × 16` pixels and printed via viuer (kitty/sixel).
-  Text fallback is a Unicode half-block chart sized to the terminal width
-  (TIOCGWINSZ, 80×24 fallback)
+- Terminal charts: a textplots braille chart, 15 rows tall, sized to the
+  terminal width (TIOCGWINSZ, 80×24 fallback). The x axis labels show the
+  start/end dates, the y axis labels show rate values
 
 ## Behavior
 

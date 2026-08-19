@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use std::path::PathBuf;
 
 use crate::provider::Provider;
-use crate::render::{Format, Protocol};
+use crate::render::Format;
 
 pub enum Command {
     Convert(ConvertArgs),
@@ -28,7 +28,6 @@ pub struct ChartArgs {
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
     pub format: Format,
-    pub protocol: Protocol,
     pub output: Option<PathBuf>,
     pub source: String,
     pub target: String,
@@ -127,7 +126,6 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
     let mut from = None;
     let mut to = None;
     let mut format = Format::Auto;
-    let mut protocol = Protocol::Auto;
     let mut output = None;
     let mut positional = Vec::new();
     let mut iter = args.iter();
@@ -167,24 +165,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
                 match Format::from_name(value) {
                     Some(parsed) => format = parsed,
                     None => {
-                        eprintln!("error: unknown format {value:?} (valid: csv, json, png, auto)");
-                        chart_usage();
-                        return Err(2);
-                    }
-                }
-            }
-            "--protocol" => {
-                let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a protocol");
-                    chart_usage();
-                    return Err(2);
-                };
-                match Protocol::from_name(value) {
-                    Some(parsed) => protocol = parsed,
-                    None => {
-                        eprintln!(
-                            "error: unknown protocol {value:?} (valid: auto, kitty, sixel, text)"
-                        );
+                        eprintln!("error: unknown format {value:?} (valid: csv, json, text, auto)");
                         chart_usage();
                         return Err(2);
                     }
@@ -247,7 +228,6 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
         from,
         to,
         format,
-        protocol,
         output,
         source: positional[0].to_uppercase(),
         target: positional[1].to_uppercase(),
@@ -277,9 +257,8 @@ Historical exchange-rate chart from ECB reference rates (1 SOURCE = x TARGET).
 Options:
   --from <date>           inclusive start date (YYYY-MM-DD, default: earliest data)
   --to <date>             inclusive end date (YYYY-MM-DD, default: latest data)
-  --format <format>       csv, json, png, or auto (default: auto)
-  --protocol <protocol>   auto, kitty, sixel, or text (default: auto)
-  --output <path>         write output to a file instead of stdout
+  --format <format>       csv, json, text, or auto (default: auto)
+  --output <path>         write the chart to a file instead of stdout
   -p, --provider <name>   history source: ecb (default)
   -u, --update            force re-download of historical rates
   -h, --help              show this help"

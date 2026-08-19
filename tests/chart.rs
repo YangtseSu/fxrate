@@ -169,10 +169,10 @@ fn chart_json_is_machine_readable() {
 }
 
 #[test]
-fn chart_writes_png_file() {
-    let home = temp_home("png");
+fn chart_writes_text_file() {
+    let home = temp_home("textfile");
     seed_history(&home, "ecb");
-    let target = home.join("chart.png");
+    let target = home.join("chart.txt");
     let out = run(
         &home,
         &[
@@ -192,8 +192,42 @@ fn chart_writes_png_file() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let bytes = std::fs::read(&target).unwrap();
-    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let text = std::fs::read_to_string(&target).unwrap();
+    assert!(text.starts_with("USD \u{2192} CNY\n"));
+    assert!(text.contains("2025-01-02"));
+    assert!(text.contains("2025-01-06"));
+}
+
+#[test]
+fn chart_text_format_renders_braille_chart() {
+    let home = temp_home("text");
+    seed_history(&home, "ecb");
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2025-01-02",
+            "--to",
+            "2025-01-06",
+            "--format",
+            "text",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("USD \u{2192} CNY\n"));
+    assert!(stdout
+        .chars()
+        .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
+    assert!(stdout.contains("2025-01-02"));
+    assert!(stdout.contains("2025-01-06"));
 }
 
 #[test]

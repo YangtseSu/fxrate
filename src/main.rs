@@ -16,12 +16,12 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::process;
 
 use cli::{ChartArgs, Command, ConvertArgs};
 use provider::Provider;
-use render::{DisplayProtocol, Format};
+use render::Format;
 
 #[derive(Debug)]
 struct HuobiError(String);
@@ -210,7 +210,6 @@ fn run_chart(args: ChartArgs) {
         from,
         to,
         format,
-        protocol,
         output,
         source,
         target,
@@ -292,8 +291,8 @@ fn run_chart(args: ChartArgs) {
 
     let tty = io::stdout().is_terminal();
     let resolved = match format {
-        Format::Auto if output.is_some() => Format::Png,
-        Format::Auto if tty => Format::Png,
+        Format::Auto if output.is_some() => Format::Text,
+        Format::Auto if tty => Format::Text,
         Format::Auto => Format::Csv,
         other => other,
     };
@@ -301,87 +300,24 @@ fn run_chart(args: ChartArgs) {
     match resolved {
         Format::Csv => print!("{}", render::render_csv(&points)),
         Format::Json => println!("{}", render::render_json(&points, &source, &target)),
-        Format::Png if output.is_some() => {
-            let path = output.as_ref().expect("checked above");
-            match render::render_png(&points, &source, &target, 1200, 600) {
-                Ok(png) => {
-                    if let Err(error) = fs::write(path, png) {
+        Format::Text => {
+            let text = if points.len() == 1 {
+                let (date, rate) = points[0];
+                format!(
+                    "1 {source} = {} {target} ({date})\n",
+                    render::fmt_value(rate)
+                )
+            } else {
+                let (cols, _) = render::terminal_size();
+                render::render_text(&points, &source, &target, cols as usize)
+            };
+            match output {
+                Some(path) => {
+                    if let Err(error) = fs::write(&path, text) {
                         fatal(&format!("failed to write {}: {error}", path.display()));
                     }
                 }
-                Err(error) => fatal(&format!("failed to render chart: {error}")),
-            }
-        }
-        Format::Png if tty => {
-            if points.len() == 1 {
-                let (date, rate) = points[0];
-                println!("1 {source} = {} {target} ({date})", render::fmt_value(rate));
-                return;
-            }
-            // Resolve the protocol only when actually emitting to the
-            // terminal. viuer's support probes are interactive and can
-            // hang, so forced protocols require an environment hint.
-            let protocol = match protocol {
-                render::Protocol::Auto => render::detect_protocol(),
-                render::Protocol::Kitty if render::kitty_env_hint() => DisplayProtocol::Kitty,
-                render::Protocol::Kitty => {
-                    eprintln!(
-                        "warning: --protocol kitty requested but no kitty terminal detected; using text chart"
-                    );
-                    DisplayProtocol::Text
-                }
-                render::Protocol::Sixel if render::sixel_env_hint() => DisplayProtocol::Sixel,
-                render::Protocol::Sixel => {
-                    eprintln!(
-                        "warning: --protocol sixel requested but no sixel-capable terminal detected; using text chart"
-                    );
-                    DisplayProtocol::Text
-                }
-                render::Protocol::Text => DisplayProtocol::Text,
-            };
-            let (cols, rows) = render::terminal_size();
-            if protocol == DisplayProtocol::Text {
-                print!(
-                    "{}",
-                    render::render_text(&points, &source, &target, cols as usize)
-                );
-                return;
-            }
-            let width = cols as u32 * 8;
-            let height = rows as u32 * 16;
-            match render::render_png(&points, &source, &target, width, height) {
-                Ok(png) => match render::print_terminal(&png, protocol, cols, rows) {
-                    Ok(()) => {}
-                    Err(error) => {
-                        eprintln!(
-                            "warning: failed to print terminal image: {error}; falling back to text chart"
-                        );
-                        print!(
-                            "{}",
-                            render::render_text(&points, &source, &target, cols as usize)
-                        );
-                    }
-                },
-                Err(error) => {
-                    eprintln!(
-                        "warning: failed to render chart image: {error}; falling back to text chart"
-                    );
-                    print!(
-                        "{}",
-                        render::render_text(&points, &source, &target, cols as usize)
-                    );
-                }
-            }
-        }
-        Format::Png => {
-            // Piped stdout: emit raw PNG bytes.
-            match render::render_png(&points, &source, &target, 1200, 600) {
-                Ok(png) => {
-                    if let Err(error) = io::stdout().write_all(&png) {
-                        fatal(&format!("failed to write chart: {error}"));
-                    }
-                }
-                Err(error) => fatal(&format!("failed to render chart: {error}")),
+                None => print!("{text}"),
             }
         }
         Format::Auto => unreachable!("auto resolved above"),

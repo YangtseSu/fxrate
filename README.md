@@ -12,7 +12,8 @@ offline after the first sync.
 - `-u` / `--update` to force a refresh
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
-- Historical charts (`huobi chart`) from ECB reference rates: terminal image (kitty/sixel) with automatic text fallback, plus CSV/JSON/PNG output
+- Historical charts (`huobi chart`) from ECB reference rates: a terminal
+  text chart (textplots), plus CSV/JSON output
 - XDG-compliant config, cache, and history locations
 
 ## Build
@@ -48,17 +49,17 @@ huobi -u 100 USD           # force-refresh rates, then convert
 huobi -p exchange-api 100 USD EUR   # fetch from exchange-api instead
 
 huobi chart USD CNY --from 2025-01-01 --to 2025-03-31
-                           # terminal chart (kitty/sixel, text fallback)
+                           # terminal text chart
 huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
-huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.png
+huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 ```
 
 The chart command plots `1 SOURCE = x TARGET` from ECB reference rates.
-`--format` is `csv`, `json`, `png`, or `auto` (terminal image on a TTY,
-CSV otherwise); `--output PATH` writes to a file; `--protocol` forces
-`kitty`, `sixel`, or `text`. The first chart run downloads the ECB full
-history (about 0.6 MB); afterwards everything works offline. Charts have
-no data for weekends/holidays and are never interpolated.
+`--format` is `csv`, `json`, `text`, or `auto` (text chart on a TTY,
+CSV otherwise); `--output PATH` writes the chart to a file. The first
+chart run downloads the ECB full history (about 0.6 MB); afterwards
+everything works offline. Charts have no data for weekends/holidays and
+are never interpolated.
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.
