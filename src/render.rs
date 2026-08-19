@@ -87,6 +87,16 @@ fn days(date: NaiveDate) -> i64 {
         .num_days()
 }
 
+/// Chart label font: a subset of DejaVu Sans (printable ASCII + arrows),
+/// embedded so PNG rendering has no system font dependency.
+/// See assets/DejaVuSans-LICENSE.txt.
+const CHART_FONT: &[u8] = include_bytes!("../assets/DejaVuSans-subset.ttf");
+
+fn register_chart_font() -> Result<(), Box<dyn Error>> {
+    plotters::style::register_font("sans-serif", plotters::style::FontStyle::Normal, CHART_FONT)
+        .map_err(|_| crate::boxed_error("failed to register chart font"))
+}
+
 fn x_label_day(days: &i64) -> String {
     let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap() + chrono::Duration::days(*days);
     date.format("%Y-%m-%d").to_string()
@@ -143,6 +153,7 @@ pub fn render_png(
     if width == 0 || height == 0 {
         return Err(crate::boxed_error("image dimensions must be non-zero"));
     }
+    register_chart_font()?;
     let mut buf = vec![0u8; width as usize * height as usize * 3];
     {
         let root = BitMapBackend::with_buffer(&mut buf, (width, height)).into_drawing_area();
@@ -219,17 +230,20 @@ pub fn render_png(
 }
 
 /// Terminal size in columns and rows via TIOCGWINSZ, falling back to
-/// 80x24 when unavailable.
+/// 80x24 when unavailable (including non-Unix platforms).
 pub fn terminal_size() -> (u16, u16) {
-    // SAFETY: ws is written by the ioctl before we read it, and the
-    // pointer is valid for the duration of the call.
-    let mut ws = std::mem::MaybeUninit::<libc::winsize>::uninit();
-    let result = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, ws.as_mut_ptr()) };
-    if result == 0 {
-        // SAFETY: ioctl success means ws is initialized.
-        let ws = unsafe { ws.assume_init() };
-        if ws.ws_col > 0 && ws.ws_row > 0 {
-            return (ws.ws_col, ws.ws_row);
+    #[cfg(unix)]
+    {
+        // SAFETY: ws is written by the ioctl before we read it, and the
+        // pointer is valid for the duration of the call.
+        let mut ws = std::mem::MaybeUninit::<libc::winsize>::uninit();
+        let result = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, ws.as_mut_ptr()) };
+        if result == 0 {
+            // SAFETY: ioctl success means ws is initialized.
+            let ws = unsafe { ws.assume_init() };
+            if ws.ws_col > 0 && ws.ws_row > 0 {
+                return (ws.ws_col, ws.ws_row);
+            }
         }
     }
     (80, 24)

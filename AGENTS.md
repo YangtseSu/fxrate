@@ -20,8 +20,11 @@ source and tests when changing this document.
 - Build: `cargo build --release --locked`
 - Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
 - Cargo build artifact: `target/release/huobi`; Cargo's `target/` directory is gitignored
-- `rusqlite` bundled and `plotters`' font stack compile C code, so the
-  build needs a C toolchain (already required by the `ring` dependency)
+- `rusqlite` bundled compiles C code, so the build needs a C compiler
+  (already required by the `ring` dependency). Chart labels use an
+  embedded subset of DejaVu Sans (`assets/DejaVuSans-subset.ttf`, license
+  in `assets/DejaVuSans-LICENSE.txt`), so there is no system font or
+  fontconfig dependency at build or run time
 
 ## Data source
 

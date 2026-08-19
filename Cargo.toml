@@ -14,7 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 csv = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "ttf", "line_series", "point_series"] }
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "ab_glyph", "line_series", "point_series"] }
 viuer = { version = "0.11", default-features = false, features = ["icy_sixel"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
