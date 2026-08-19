@@ -1,7 +1,7 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 
 pkgname=huobi
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 arch=('x86_64' 'aarch64')
@@ -10,7 +10,7 @@ license=('GPL-3.0-only')
 depends=()
 makedepends=('rust')
 source=("$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('49a4b21a6ee5f4ceae8b3d0c23d3e9f01d0229d8f090cd1b27832279876557fb')
+sha256sums=('717908fc3d941e2e6eed039e899455ace1af9f29f256494401e51ef19e0551fe')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
@@ -22,7 +22,11 @@ build() {
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"
-  cargo test --locked
+  # Bundled C code (ring, SQLite, FreeType) does not link in debug/test
+  # builds with Arch's global LTO flag; same treatment as build().
+  CFLAGS="${CFLAGS//-flto=auto/}" \
+    CXXFLAGS="${CXXFLAGS//-flto=auto/}" \
+    cargo test --locked
 }
 
 package() {
