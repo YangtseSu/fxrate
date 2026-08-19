@@ -203,6 +203,14 @@ Release flow for a new version:
    `.github/workflows/release.yml`, which builds the four platform binaries.
    A new GitHub release gets auto-generated notes; an existing release has its
    assets updated
+
+GitHub access: when `gh` is available, prefer it for everything GitHub —
+`gh` for viewing (runs, releases, repos), and `gh auth setup-git` so `git
+push` goes over HTTPS through the gh credential helper (SSH on port 22 is
+often blocked on restricted networks; `gh auth login --web` stores the token
+in the system keyring). `gh release view/upload/create` are also used to
+inspect or repair a release. Note: `gh` reads `$XDG_CONFIG_HOME` — do not run
+it with a test home's XDG vars exported in the same shell.
 3. Download the tag archive and compute the checksum:
    `curl -fsSLo /tmp/huobi.tar.gz https://github.com/YangtseSu/huobi/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/huobi.tar.gz`
    — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD

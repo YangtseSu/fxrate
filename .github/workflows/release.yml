@@ -35,7 +35,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary: huobi.exe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.os != 'linux' || matrix.arch == 'amd64'
@@ -68,7 +68,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}.exe"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/
@@ -80,11 +80,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
