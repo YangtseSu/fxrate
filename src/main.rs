@@ -1,102 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Yangtse Su
 //
-// Command huobi is an offline currency conversion CLI.
+// Command huobi is an offline currency conversion CLI with historical
+// exchange-rate charts.
 
-use chrono::{DateTime, Utc};
-use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+mod cli;
+mod current;
+mod history;
+mod provider;
+mod render;
+mod series;
+mod storage;
+
 use std::collections::HashSet;
-use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::io::{self, IsTerminal, Write};
 use std::process;
-use std::time::Duration;
 
-const FRANKFURTER_URL: &str = "https://api.frankfurter.dev/v2/rates?base=EUR";
-const EXCHANGE_API_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.min.json";
-const EXCHANGE_API_FALLBACK_URL: &str =
-    "https://latest.currency-api.pages.dev/v1/currencies/eur.min.json";
-const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
-const MAX_RESPONSE_SIZE: usize = 1 << 20;
-const DEFAULT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Provider {
-    Frankfurter,
-    ExchangeApi,
-}
-
-impl Provider {
-    fn from_name(name: &str) -> Option<Provider> {
-        match name.to_ascii_lowercase().as_str() {
-            "frankfurter" => Some(Provider::Frankfurter),
-            "exchange-api" | "exchangeapi" => Some(Provider::ExchangeApi),
-            _ => None,
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            Provider::Frankfurter => "frankfurter",
-            Provider::ExchangeApi => "exchange-api",
-        }
-    }
-}
-
-fn default_provider() -> String {
-    "frankfurter".to_owned()
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Config {
-    #[serde(default)]
-    update_interval: String,
-    #[serde(default = "default_provider")]
-    provider: String,
-    #[serde(default)]
-    currencies: Vec<String>,
-    #[serde(default)]
-    multi_view: Option<bool>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            update_interval: "24h".to_owned(),
-            provider: default_provider(),
-            multi_view: Some(true),
-            currencies: vec![
-                "USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CHF", "AUD", "CAD", "SGD", "SEK", "NOK",
-                "DKK", "PLN", "CZK", "HUF", "RON", "KRW", "INR", "IDR", "MYR", "PHP", "THB", "ILS",
-                "ISK", "TRY", "MXN", "BRL", "ZAR", "NZD",
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
-        }
-    }
-}
-
-impl Config {
-    fn multi_view(&self) -> bool {
-        self.multi_view.unwrap_or(true)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct RateSnapshot {
-    base: String,
-    date: String,
-    fetched_at: DateTime<Utc>,
-    #[serde(default)]
-    provider: String,
-    rates: std::collections::HashMap<String, f64>,
-}
+use cli::{ChartArgs, Command, ConvertArgs};
+use provider::Provider;
+use render::{DisplayProtocol, Format};
 
 #[derive(Debug)]
 struct HuobiError(String);
@@ -113,390 +38,60 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
     Box::new(HuobiError(message.into()))
 }
 
-fn config_path() -> PathBuf {
-    let dir = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.join("huobi").join("config.json")
-}
-
-fn data_path() -> PathBuf {
-    let dir = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.join("huobi").join("rates.json")
-}
-
-fn save_json<T: Serialize>(path: &Path, value: &T, atomic: bool) -> Result<(), Box<dyn Error>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(value)?;
-    if atomic {
-        let temp = path.with_extension("json.tmp");
-        fs::write(&temp, bytes)?;
-        fs::rename(temp, path)?;
-    } else {
-        fs::write(path, bytes)?;
-    }
-    Ok(())
-}
-
-fn load_config() -> Config {
-    let path = config_path();
-    match fs::read(&path) {
-        Ok(bytes) => match serde_json::from_slice(&bytes) {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!("warning: malformed config: {error}, using defaults");
-                Config::default()
-            }
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let config = Config::default();
-            if let Err(error) = save_json(&path, &config, false) {
-                eprintln!("warning: failed to write default config: {error}");
-            }
-            config
-        }
-        Err(error) => {
-            eprintln!("warning: failed to read config: {error}, using defaults");
-            Config::default()
-        }
-    }
-}
-
-fn load_rates() -> Result<RateSnapshot, Box<dyn Error>> {
-    let bytes = fs::read(data_path())?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| boxed_error(format!("corrupted rate cache: {error}")))
-}
-
-fn save_rates(snapshot: &RateSnapshot) -> Result<(), Box<dyn Error>> {
-    save_json(&data_path(), snapshot, true)
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiRate {
-    date: String,
-    base: String,
-    quote: String,
-    rate: f64,
-}
-
-fn get_bytes(url: &str) -> Result<Vec<u8>, Box<dyn Error>> {
-    let client = Client::builder().timeout(HTTP_TIMEOUT).build()?;
-    let response = client.get(url).send()?;
-    let status = response.status();
-    let bytes = response.bytes()?.to_vec();
-    if bytes.len() > MAX_RESPONSE_SIZE {
-        return Err(boxed_error("API response exceeded 1 MiB"));
-    }
-    if !status.is_success() {
-        let body = String::from_utf8_lossy(&bytes);
-        return Err(boxed_error(format!(
-            "API returned {status}: {}",
-            body.trim()
-        )));
-    }
-    Ok(bytes)
-}
-
-fn fetch_frankfurter_rates() -> Result<RateSnapshot, Box<dyn Error>> {
-    let bytes = get_bytes(FRANKFURTER_URL)?;
-    let rows: Vec<ApiRate> = serde_json::from_slice(&bytes)
-        .map_err(|error| boxed_error(format!("failed to parse API response: {error}")))?;
-    let first = rows
-        .first()
-        .ok_or_else(|| boxed_error("API response contained no rates"))?;
-    let base = first.base.to_uppercase();
-    let date = first.date.clone();
-    let rates = rows
-        .into_iter()
-        .map(|row| (row.quote.to_uppercase(), row.rate))
-        .collect();
-    Ok(RateSnapshot {
-        base,
-        date,
-        fetched_at: Utc::now(),
-        provider: String::new(),
-        rates,
-    })
-}
-
-fn parse_exchange_api(bytes: &[u8]) -> Result<RateSnapshot, Box<dyn Error>> {
-    let value: serde_json::Value = serde_json::from_slice(bytes)
-        .map_err(|error| boxed_error(format!("failed to parse API response: {error}")))?;
-    let date = value
-        .get("date")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| boxed_error("API response missing date"))?
-        .to_owned();
-    let map = value
-        .get("eur")
-        .and_then(serde_json::Value::as_object)
-        .ok_or_else(|| boxed_error("API response missing base currency rates"))?;
-    let rates = map
-        .iter()
-        .map(|(code, rate)| {
-            let rate = rate
-                .as_f64()
-                .ok_or_else(|| boxed_error(format!("invalid rate for currency {code}")))?;
-            Ok((code.to_uppercase(), rate))
-        })
-        .collect::<Result<_, Box<dyn Error>>>()?;
-    Ok(RateSnapshot {
-        base: "EUR".to_owned(),
-        date,
-        fetched_at: Utc::now(),
-        provider: String::new(),
-        rates,
-    })
-}
-
-fn fetch_exchange_api_rates() -> Result<RateSnapshot, Box<dyn Error>> {
-    let bytes = match get_bytes(EXCHANGE_API_URL) {
-        Ok(bytes) => bytes,
-        Err(primary_error) => get_bytes(EXCHANGE_API_FALLBACK_URL).map_err(|fallback_error| {
-            boxed_error(format!(
-                "primary endpoint failed ({primary_error}); fallback endpoint failed ({fallback_error})"
-            ))
-        })?,
-    };
-    parse_exchange_api(&bytes)
-}
-
-fn fetch_rates(provider: Provider) -> Result<RateSnapshot, Box<dyn Error>> {
-    let mut snapshot = match provider {
-        Provider::Frankfurter => fetch_frankfurter_rates(),
-        Provider::ExchangeApi => fetch_exchange_api_rates(),
-    }?;
-    snapshot.provider = provider.name().to_owned();
-    Ok(snapshot)
-}
-
-fn currency_rate(snapshot: &RateSnapshot, currency: &str) -> Result<f64, Box<dyn Error>> {
-    if currency == snapshot.base {
-        return Ok(1.0);
-    }
-    snapshot.rates.get(currency).copied().ok_or_else(|| {
-        boxed_error(format!(
-            "no rate for currency {currency} (rates date {})",
-            snapshot.date
-        ))
-    })
-}
-
-fn convert(
-    snapshot: &RateSnapshot,
-    source: &str,
-    target: &str,
-    amount: f64,
-) -> Result<f64, Box<dyn Error>> {
-    let source_rate = currency_rate(snapshot, source)?;
-    let target_rate = currency_rate(snapshot, target)?;
-    Ok(amount * target_rate / source_rate)
-}
-
-fn parse_duration(value: &str) -> Option<Duration> {
-    let mut total = 0.0_f64;
-    let mut rest = value;
-    while !rest.is_empty() {
-        let digit_count = rest
-            .char_indices()
-            .find(|(_, ch)| !ch.is_ascii_digit() && *ch != '.')
-            .map(|(index, _)| index)
-            .unwrap_or(rest.len());
-        if digit_count == 0 {
-            return None;
-        }
-        let number: f64 = rest[..digit_count].parse().ok()?;
-        rest = &rest[digit_count..];
-        let units = ["ns", "us", "µs", "ms", "s", "m", "h"];
-        let unit = units.iter().find(|unit| rest.starts_with(**unit))?;
-        let multiplier = match *unit {
-            "ns" => 1e-9,
-            "us" | "µs" => 1e-6,
-            "ms" => 1e-3,
-            "s" => 1.0,
-            "m" => 60.0,
-            "h" => 3600.0,
-            _ => unreachable!(),
-        };
-        total += number * multiplier;
-        rest = &rest[unit.len()..];
-    }
-    if total.is_finite() && total > 0.0 {
-        Duration::try_from_secs_f64(total).ok()
-    } else {
-        None
-    }
-}
-
-fn cache_needs_refresh(
-    snapshot: Option<&RateSnapshot>,
-    provider: Provider,
-    interval: Duration,
-) -> bool {
-    snapshot.is_none_or(|snapshot| {
-        snapshot.provider != provider.name()
-            || Utc::now()
-                .signed_duration_since(snapshot.fetched_at)
-                .to_std()
-                .map(|age| age > interval)
-                .unwrap_or(false)
-    })
-}
-
-fn dedupe_targets(currencies: &[String], source: &str, exclude: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    seen.insert(source.to_owned());
-    for currency in exclude {
-        seen.insert(currency.to_uppercase());
-    }
-    currencies
-        .iter()
-        .map(|currency| currency.to_uppercase())
-        .filter(|currency| seen.insert(currency.clone()))
-        .collect()
-}
-
-fn usage() {
-    eprintln!(
-        "Usage: huobi [options] AMOUNT SOURCE [TARGET...]
-
-Offline currency converter. With no targets, shows the multi-currency view;
-explicit targets are listed first, followed by the default multi-currency list.
-
-Options:
-  -u, --update            force-refresh rates (ignore cache age)
-  -p, --provider <name>   rates source: frankfurter (default) or exchange-api"
-    );
-}
-
-struct Args {
-    force: bool,
-    provider: Option<String>,
-    amount: f64,
-    source: String,
-    targets: Vec<String>,
-}
-
-fn parse_args() -> Result<Args, i32> {
-    let mut force = false;
-    let mut provider = None;
-    let mut positional = Vec::new();
-    let mut args = env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-u" | "--update" => force = true,
-            "-p" | "--provider" => {
-                let Some(name) = args.next() else {
-                    eprintln!("error: option {arg} requires a provider name");
-                    usage();
-                    return Err(2);
-                };
-                provider = Some(name);
-            }
-            "-h" | "--help" => {
-                usage();
-                return Err(0);
-            }
-            _ if arg.starts_with('-') => {
-                eprintln!("error: unknown option {arg}");
-                usage();
-                return Err(2);
-            }
-            _ => positional.push(arg),
-        }
-    }
-    if let Some(name) = &provider {
-        if Provider::from_name(name).is_none() {
-            let valid = [Provider::Frankfurter, Provider::ExchangeApi]
-                .iter()
-                .map(|provider| provider.name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            eprintln!("error: unknown provider {name:?} (valid: {valid})");
-            usage();
-            return Err(2);
-        }
-    }
-    if positional.len() < 2 {
-        usage();
-        return Err(2);
-    }
-    let amount = positional[0].parse::<f64>().map_err(|_| {
-        eprintln!("error: invalid amount {:?}", positional[0]);
-        2
-    })?;
-    if !amount.is_finite() {
-        eprintln!("error: amount must be finite");
-        usage();
-        return Err(2);
-    }
-    let source = positional[1].to_uppercase();
-    let targets = positional[2..]
-        .iter()
-        .map(|target| target.to_uppercase())
-        .collect();
-    Ok(Args {
-        force,
-        provider,
-        amount,
-        source,
-        targets,
-    })
-}
-
-struct Row {
-    code: String,
-    value: f64,
+fn fatal(message: &str) -> ! {
+    eprintln!("error: {message}");
+    process::exit(1);
 }
 
 fn main() {
-    let Args {
+    let command = match cli::parse_args() {
+        Ok(command) => command,
+        Err(code) => process::exit(code),
+    };
+    match command {
+        Command::Convert(args) => run_convert(args),
+        Command::Chart(args) => run_chart(args),
+    }
+}
+
+fn run_convert(args: ConvertArgs) {
+    let ConvertArgs {
         force,
         provider: cli_provider,
         amount,
         source,
         targets: explicit,
-    } = match parse_args() {
-        Ok(args) => args,
-        Err(code) => process::exit(code),
-    };
-    let config = load_config();
+    } = args;
+    let config = storage::load_config();
     let provider = match cli_provider {
         Some(name) => Provider::from_name(&name).expect("provider validated by parse_args"),
-        None => match Provider::from_name(&config.provider) {
+        None => match Provider::from_name(config.provider()) {
             Some(provider) => provider,
             None => {
                 eprintln!(
                     "warning: invalid provider {:?} in config, falling back to frankfurter",
-                    config.provider
+                    config.provider()
                 );
                 Provider::Frankfurter
             }
         },
     };
-    let interval = if config.update_interval.is_empty() {
-        DEFAULT_INTERVAL
+    let interval = if config.update_interval().is_empty() {
+        storage::DEFAULT_INTERVAL
     } else {
-        match parse_duration(&config.update_interval) {
+        match storage::parse_duration(config.update_interval()) {
             Some(duration) => duration,
             None => {
                 eprintln!(
                     "warning: invalid update_interval={:?} in config, falling back to 24h",
-                    config.update_interval
+                    config.update_interval()
                 );
-                DEFAULT_INTERVAL
+                storage::DEFAULT_INTERVAL
             }
         }
     };
 
-    let mut snapshot = match load_rates() {
+    let mut snapshot = match storage::load_rates() {
         Ok(snapshot) => Some(snapshot),
         Err(error) => {
             if error.downcast_ref::<io::Error>().is_none() {
@@ -505,12 +100,12 @@ fn main() {
             None
         }
     };
-    let stale = cache_needs_refresh(snapshot.as_ref(), provider, interval);
+    let stale = current::cache_needs_refresh(snapshot.as_ref(), provider, interval);
     let mut updated = false;
     if force || stale {
-        match fetch_rates(provider) {
+        match current::fetch_rates(provider) {
             Ok(fresh) => {
-                if let Err(error) = save_rates(&fresh) {
+                if let Err(error) = storage::save_rates(&fresh) {
                     eprintln!("warning: failed to save rates cache: {error}");
                 }
                 snapshot = Some(fresh);
@@ -535,19 +130,21 @@ fn main() {
         }
     }
     let snapshot = snapshot.expect("fatal exits when no snapshot is available");
-    if let Err(error) = currency_rate(&snapshot, &source) {
+    if let Err(error) = current::currency_rate(&snapshot, &source) {
         fatal(&error.to_string());
     }
 
     let convert_list = |list: Vec<String>| {
         list.into_iter()
-            .filter_map(|code| match convert(&snapshot, &source, &code, amount) {
-                Ok(value) => Some(Row { code, value }),
-                Err(error) => {
-                    eprintln!("warning: {error}, skipped");
-                    None
-                }
-            })
+            .filter_map(
+                |code| match current::convert(&snapshot, &source, &code, amount) {
+                    Ok(value) => Some(Row { code, value }),
+                    Err(error) => {
+                        eprintln!("warning: {error}, skipped");
+                        None
+                    }
+                },
+            )
             .collect::<Vec<_>>()
     };
     let explicit_rows = convert_list(dedupe_targets(&explicit, &source, &[]));
@@ -556,7 +153,7 @@ fn main() {
             .iter()
             .map(|row| row.code.clone())
             .collect::<Vec<_>>();
-        convert_list(dedupe_targets(&config.currencies, &source, &excluded))
+        convert_list(dedupe_targets(config.currencies(), &source, &excluded))
     } else {
         Vec::new()
     };
@@ -606,57 +203,212 @@ fn main() {
     }
 }
 
-fn fatal(message: &str) -> ! {
-    eprintln!("error: {message}");
-    process::exit(1);
+fn run_chart(args: ChartArgs) {
+    let ChartArgs {
+        force,
+        provider: cli_provider,
+        from,
+        to,
+        format,
+        protocol,
+        output,
+        source,
+        target,
+    } = args;
+    let provider =
+        Provider::from_name(cli_provider.as_deref().unwrap_or("ecb")).expect("validated by cli");
+
+    let mut conn = match history::open_history_db() {
+        Ok(conn) => conn,
+        Err(error) => fatal(&format!("failed to open history database: {error}")),
+    };
+    let mut coverage = match history::coverage_range(&conn, provider) {
+        Ok(coverage) => coverage,
+        Err(error) => fatal(&format!("failed to read history coverage: {error}")),
+    };
+    let mut need_sync = force || coverage.is_none();
+    if !need_sync {
+        if let (Some(from), Some(to)) = (from, to) {
+            need_sync = match history::coverage_covers(&conn, provider, from, to) {
+                Ok(covered) => !covered,
+                Err(error) => fatal(&format!("failed to check history coverage: {error}")),
+            };
+        }
+    }
+    if need_sync {
+        match history::sync_history(&mut conn, provider) {
+            Ok((start, end)) => {
+                coverage = Some(history::Coverage { start, end });
+            }
+            Err(error) if coverage.is_none() => fatal(&format!(
+                "no historical rates available and update failed: {error}"
+            )),
+            Err(error) => {
+                eprintln!("warning: failed to update historical rates: {error}; using cached data");
+            }
+        }
+    }
+    let Some(coverage) = coverage else {
+        fatal("no historical rates available");
+    };
+    let from = from.unwrap_or(coverage.start);
+    let to = to.unwrap_or(coverage.end);
+
+    let universe = match history::date_universe(&conn, provider, from, to) {
+        Ok(universe) => universe,
+        Err(error) => fatal(&format!("failed to read historical rates: {error}")),
+    };
+    if universe.is_empty() {
+        fatal(&format!("no historical rates between {from} and {to}"));
+    }
+    let load_series = |quote: &str| -> Vec<series::Point> {
+        if quote == "EUR" {
+            universe.iter().map(|date| (*date, 1.0)).collect()
+        } else {
+            match history::rate_series(&conn, provider, quote, from, to) {
+                Ok(series) => series,
+                Err(error) => fatal(&format!("failed to read historical rates: {error}")),
+            }
+        }
+    };
+    let source_series = load_series(&source);
+    if source_series.is_empty() {
+        fatal(&format!(
+            "no historical rates for {source} between {from} and {to}"
+        ));
+    }
+    let target_series = load_series(&target);
+    if target_series.is_empty() {
+        fatal(&format!(
+            "no historical rates for {target} between {from} and {to}"
+        ));
+    }
+    let points = series::cross_series(&source_series, &target_series);
+    if points.is_empty() {
+        fatal(&format!(
+            "no overlapping data for {source} and {target} between {from} and {to}"
+        ));
+    }
+
+    let tty = io::stdout().is_terminal();
+    let resolved = match format {
+        Format::Auto if output.is_some() => Format::Png,
+        Format::Auto if tty => Format::Png,
+        Format::Auto => Format::Csv,
+        other => other,
+    };
+
+    match resolved {
+        Format::Csv => print!("{}", render::render_csv(&points)),
+        Format::Json => println!("{}", render::render_json(&points, &source, &target)),
+        Format::Png if output.is_some() => {
+            let path = output.as_ref().expect("checked above");
+            match render::render_png(&points, &source, &target, 1200, 600) {
+                Ok(png) => {
+                    if let Err(error) = fs::write(path, png) {
+                        fatal(&format!("failed to write {}: {error}", path.display()));
+                    }
+                }
+                Err(error) => fatal(&format!("failed to render chart: {error}")),
+            }
+        }
+        Format::Png if tty => {
+            if points.len() == 1 {
+                let (date, rate) = points[0];
+                println!("1 {source} = {} {target} ({date})", render::fmt_value(rate));
+                return;
+            }
+            // Resolve the protocol only when actually emitting to the
+            // terminal. viuer's support probes are interactive and can
+            // hang, so forced protocols require an environment hint.
+            let protocol = match protocol {
+                render::Protocol::Auto => render::detect_protocol(),
+                render::Protocol::Kitty if render::kitty_env_hint() => DisplayProtocol::Kitty,
+                render::Protocol::Kitty => {
+                    eprintln!(
+                        "warning: --protocol kitty requested but no kitty terminal detected; using text chart"
+                    );
+                    DisplayProtocol::Text
+                }
+                render::Protocol::Sixel if render::sixel_env_hint() => DisplayProtocol::Sixel,
+                render::Protocol::Sixel => {
+                    eprintln!(
+                        "warning: --protocol sixel requested but no sixel-capable terminal detected; using text chart"
+                    );
+                    DisplayProtocol::Text
+                }
+                render::Protocol::Text => DisplayProtocol::Text,
+            };
+            let (cols, rows) = render::terminal_size();
+            if protocol == DisplayProtocol::Text {
+                print!(
+                    "{}",
+                    render::render_text(&points, &source, &target, cols as usize)
+                );
+                return;
+            }
+            let width = cols as u32 * 8;
+            let height = rows as u32 * 16;
+            match render::render_png(&points, &source, &target, width, height) {
+                Ok(png) => match render::print_terminal(&png, protocol, cols, rows) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "warning: failed to print terminal image: {error}; falling back to text chart"
+                        );
+                        print!(
+                            "{}",
+                            render::render_text(&points, &source, &target, cols as usize)
+                        );
+                    }
+                },
+                Err(error) => {
+                    eprintln!(
+                        "warning: failed to render chart image: {error}; falling back to text chart"
+                    );
+                    print!(
+                        "{}",
+                        render::render_text(&points, &source, &target, cols as usize)
+                    );
+                }
+            }
+        }
+        Format::Png => {
+            // Piped stdout: emit raw PNG bytes.
+            match render::render_png(&points, &source, &target, 1200, 600) {
+                Ok(png) => {
+                    if let Err(error) = io::stdout().write_all(&png) {
+                        fatal(&format!("failed to write chart: {error}"));
+                    }
+                }
+                Err(error) => fatal(&format!("failed to render chart: {error}")),
+            }
+        }
+        Format::Auto => unreachable!("auto resolved above"),
+    }
+}
+
+fn dedupe_targets(currencies: &[String], source: &str, exclude: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    seen.insert(source.to_owned());
+    for currency in exclude {
+        seen.insert(currency.to_uppercase());
+    }
+    currencies
+        .iter()
+        .map(|currency| currency.to_uppercase())
+        .filter(|currency| seen.insert(currency.clone()))
+        .collect()
+}
+
+struct Row {
+    code: String,
+    value: f64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn duration_parser_supports_compound_go_durations() {
-        assert_eq!(parse_duration("1h30m"), Some(Duration::from_secs(5400)));
-        assert_eq!(parse_duration("24h"), Some(Duration::from_secs(86400)));
-        assert_eq!(parse_duration("0s"), None);
-        assert_eq!(parse_duration("tomorrow"), None);
-    }
-    #[test]
-    fn cache_refreshes_when_provider_changes() {
-        let snapshot = RateSnapshot {
-            base: "EUR".to_owned(),
-            date: "2026-08-17".to_owned(),
-            fetched_at: Utc::now(),
-            provider: "frankfurter".to_owned(),
-            rates: std::collections::HashMap::new(),
-        };
-        let interval = Duration::from_secs(3600);
-
-        assert!(!cache_needs_refresh(
-            Some(&snapshot),
-            Provider::Frankfurter,
-            interval
-        ));
-        assert!(cache_needs_refresh(
-            Some(&snapshot),
-            Provider::ExchangeApi,
-            interval
-        ));
-
-        let mut legacy = snapshot;
-        legacy.provider.clear();
-        assert!(cache_needs_refresh(
-            Some(&legacy),
-            Provider::Frankfurter,
-            interval
-        ));
-    }
-
-    #[test]
-    fn duration_parser_rejects_out_of_range_values() {
-        assert!(parse_duration("999999999999999999999h").is_none());
-    }
 
     #[test]
     fn targets_are_uppercased_deduplicated_and_excluded() {
@@ -668,42 +420,5 @@ mod tests {
         ];
         let excluded = vec!["gbp".to_owned()];
         assert_eq!(dedupe_targets(&currencies, "USD", &excluded), vec!["EUR"]);
-    }
-
-    #[test]
-    fn provider_names_are_case_insensitive() {
-        assert_eq!(
-            Provider::from_name("frankfurter"),
-            Some(Provider::Frankfurter)
-        );
-        assert_eq!(
-            Provider::from_name("FRANKFURTER"),
-            Some(Provider::Frankfurter)
-        );
-        assert_eq!(
-            Provider::from_name("Exchange-Api"),
-            Some(Provider::ExchangeApi)
-        );
-        assert_eq!(
-            Provider::from_name("exchangeapi"),
-            Some(Provider::ExchangeApi)
-        );
-        assert_eq!(Provider::from_name("fixer"), None);
-    }
-
-    #[test]
-    fn exchange_api_payload_is_parsed() {
-        let payload = br#"{"date":"2026-08-17","eur":{"usd":1.17,"jpy":190.5,"eur":1.0}}"#;
-        let snapshot = parse_exchange_api(payload).unwrap();
-        assert_eq!(snapshot.base, "EUR");
-        assert_eq!(snapshot.date, "2026-08-17");
-        assert_eq!(snapshot.rates.get("USD"), Some(&1.17));
-        assert_eq!(snapshot.rates.get("JPY"), Some(&190.5));
-    }
-
-    #[test]
-    fn exchange_api_payload_missing_rates_is_rejected() {
-        let payload = br#"{"date":"2026-08-17"}"#;
-        assert!(parse_exchange_api(payload).is_err());
     }
 }

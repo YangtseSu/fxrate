@@ -1,20 +1,27 @@
 # Project: huobi — Offline Currency Converter CLI
 
-A Rust offline currency conversion command-line tool.
+A Rust offline currency conversion command-line tool with historical
+exchange-rate charts.
 
 ## Scope
 
 This file documents the current behavior and project conventions.
-`src/main.rs` is the implementation source of truth; verify behavior against
-the source and tests when changing this document.
+`src/` is the implementation source of truth; `src/main.rs` is the entry
+point, with the code split into modules (`cli`, `current`, `history`,
+`provider`, `render`, `series`, `storage`). Verify behavior against the
+source and tests when changing this document.
 
 ## Tech stack
 
-- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, and `chrono`
-- Source: `src/main.rs`; manifest: `Cargo.toml`
+- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`,
+  `chrono`, `rusqlite` (bundled), `csv`, `zip`, `plotters`
+  (`bitmap_backend` + `ttf`), `viuer` (`icy_sixel`), `image`, and `libc`
+- Source: `src/`; manifest: `Cargo.toml`
 - Build: `cargo build --release --locked`
-- Test: `cargo test --locked`
+- Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
 - Cargo build artifact: `target/release/huobi`; Cargo's `target/` directory is gitignored
+- `rusqlite` bundled and `plotters`' font stack compile C code, so the
+  build needs a C toolchain (already required by the `ring` dependency)
 
 ## Data source
 
@@ -39,6 +46,26 @@ All conversions are computed offline from the base-EUR snapshot:
 `amount * rate[dst] / rate[src]` — no network request is needed while a
 compatible fresh cache is available.
 
+### Historical rates (chart command)
+
+- Source: ECB reference rates, full history CSV:
+  `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip`
+  (contains `eurofxref-hist.csv`; dates from 1999, values EUR-based, `N/A`
+  for missing entries; old currency columns such as EEK/LTL are dynamic)
+- The chart command (`huobi chart`) uses the ECB history exclusively; the
+  convert command never touches it. History is stored per provider in
+  SQLite (`history.db`) and is never mixed with the `rates.json` snapshot
+- On first chart use (or when the requested `--from`/`--to` range is not
+  covered, or with `-u/--update`) the full CSV is downloaded and upserted
+  in a transaction; a failed refresh keeps the cached data with a warning
+  and exits 1 only when no local history exists
+- `history_coverage` records successfully synced ranges so weekend-only
+  ranges are not mistaken for missing downloads; no weekend/holiday data
+  is fabricated and no interpolation is done
+- Chart points are the per-date intersection of both currencies (both must
+  have data that day), computed as `EUR→target / EUR→source`; EUR is a
+  unity series over the trading-date universe
+
 - `date` = the rates' business date from the API; `fetched_at` = local fetch
   time; both are stored in the cache
 - The cache records the provider that produced it. A provider change triggers
@@ -48,13 +75,15 @@ compatible fresh cache is available.
 
 ## Storage (XDG/HOME layout)
 
-| Item   | Path |
-|--------|------|
-| Config | `$XDG_CONFIG_HOME/huobi/config.json`, then `$HOME/.config/huobi/config.json`, otherwise `./huobi/config.json` |
-| Cache  | `$XDG_DATA_HOME/huobi/rates.json`, then `$HOME/.local/share/huobi/rates.json`, otherwise `./huobi/rates.json` |
+| Item    | Path |
+|---------|------|
+| Config  | `$XDG_CONFIG_HOME/huobi/config.json`, then `$HOME/.config/huobi/config.json`, otherwise `./huobi/config.json` |
+| Cache   | `$XDG_DATA_HOME/huobi/rates.json`, then `$HOME/.local/share/huobi/rates.json`, otherwise `./huobi/rates.json` |
+| History | `$XDG_DATA_HOME/huobi/history.db`, then `$HOME/.local/share/huobi/history.db`, otherwise `./huobi/history.db` (SQLite: `historical_rates`, `history_coverage`) |
 
 - Config is auto-created with defaults on first run if missing
 - Cache is written atomically (temp file + rename) to avoid corruption
+- History is written through SQLite transactions (upsert, never delete+reinsert)
 - Override both with the XDG env vars for isolated tests
 
 ### Config schema
@@ -85,6 +114,7 @@ compatible fresh cache is available.
 
 ```
 huobi [options] AMOUNT SOURCE [TARGET...]
+huobi chart [options] SOURCE TARGET
 ```
 
 - No targets → **multi-currency view** over the config `currencies` list,
@@ -100,7 +130,39 @@ huobi [options] AMOUNT SOURCE [TARGET...]
 - Amounts must parse as finite numbers; missing arguments and invalid amounts
   are usage errors (exit 2). `-h`/`--help` exits 0
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
-  unknown source currency) · `2` usage error
+  unknown source currency, chart with no history data) · `2` usage error
+
+### Chart command
+
+`huobi chart SOURCE TARGET` plots `1 SOURCE = x TARGET` over a date range
+using ECB historical reference rates (charts are always EUR-based cross
+rates; the convert command and its providers are unaffected).
+
+- `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds
+  (default: earliest/latest available data). Invalid dates or `from > to`
+  are usage errors (exit 2)
+- `--format <csv|json|png|auto>` — `auto` (default): PNG when stdout is a
+  terminal (or when `--output` is given), CSV otherwise. `csv`/`json` emit
+  text (`date,rate` rows / `{source, target, points}`); `png` emits raw PNG
+  bytes to stdout
+- `--output <path>` — write the output to a file (never emits terminal
+  escape sequences); with `auto` the file gets the PNG chart
+- `--protocol <auto|kitty|sixel|text>` — terminal image protocol. `auto`
+  detects: TTY check, then `KITTY_WINDOW_ID`/`TERM=xterm-kitty`, then a
+  sixel TERM list (xterm, foot, wezterm, mlterm, contour, vt340/vt330),
+  else text. Forced kitty/sixel without a matching environment hint warns
+  and falls back to text (viuer's own probes are interactive and would
+  hang on terminals that do not answer). `--format png` on a TTY with a
+  text protocol also renders the text chart
+- `-p`, `--provider <name>` — `ecb` only (default); anything else is a
+  usage error (exit 2)
+- Single trading day → prints `1 SOURCE = x TARGET (date)` instead of a
+  chart; an empty range (e.g. a weekend with no data) is a runtime error
+  (exit 1); unknown currencies are runtime errors (exit 1)
+- Terminal charts: PNG is rendered with plotters at
+  `cols × 8` by `rows × 16` pixels and printed via viuer (kitty/sixel).
+  Text fallback is a Unicode half-block chart sized to the terminal width
+  (TIOCGWINSZ, 80×24 fallback)
 
 ## Behavior
 
@@ -116,6 +178,11 @@ huobi [options] AMOUNT SOURCE [TARGET...]
   once, at the bottom
 - stderr: notices and warnings (skipped currencies, invalid config, failed
   refresh fallback)
+- Chart: on startup, sync the ECB full history when the requested range is
+  not covered by `history_coverage`, when there is no coverage at all, or
+  with `-u/--update`. A failed sync warns and falls back to cached data;
+  exit 1 only when no local history exists. Covered ranges never touch the
+  network
 
 ## Conventions
 
@@ -166,14 +233,22 @@ Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
 
 ## Testing notes
 
-- Run the unit suite with `cargo test --locked`
+- Run the full suite with `cargo test --locked` (module unit tests plus
+  `tests/chart.rs` integration tests, which are fully offline: they seed
+  `rates.json` / `history.db` into a fresh XDG home and block the network
+  with `HTTPS_PROXY=http://127.0.0.1:9`)
 - Offline paths: seed a handcrafted `rates.json` (set `fetched_at` to a stale
   time), include the cached provider when testing provider switching, and block
   the network, e.g. `HTTPS_PROXY=http://127.0.0.1:9` — refresh fails and the
   cache fallback is exercised
-- Fresh XDG dirs simulate a first run: config auto-creation and no-cache
-  failure
+- Chart offline paths: seed `history.db` with the same schema the app
+  creates (`historical_rates`, `history_coverage`), mark the requested range
+  covered, and block the network — a covered range must not attempt a sync
+- Fresh XDG dirs simulate a first run: config auto-creation, no-cache
+  failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache
   refresh, provider-change refresh, explicit-first ordering/dedup, offline
-  fallback math, force-update failure, interval handling, invalid config, and
-  usage errors
+  fallback math, force-update failure, interval handling, invalid config,
+  usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing
+  (N/A, old currency columns, trailing commas), EUR cross rates, single-day
+  charts, and empty ranges

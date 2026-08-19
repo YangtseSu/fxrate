@@ -1,7 +1,9 @@
 # huobi
 
 Offline currency conversion CLI with local rate caching, so conversions
-continue to work without network access once rates are available.
+continue to work without network access once rates are available. Also
+plots historical exchange-rate charts from ECB reference rates, fully
+offline after the first sync.
 
 ## Features
 
@@ -10,7 +12,8 @@ continue to work without network access once rates are available.
 - `-u` / `--update` to force a refresh
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
-- XDG-compliant config and cache locations
+- Historical charts (`huobi chart`) from ECB reference rates: terminal image (kitty/sixel) with automatic text fallback, plus CSV/JSON/PNG output
+- XDG-compliant config, cache, and history locations
 
 ## Build
 
@@ -32,6 +35,7 @@ makepkg -si
 
 ```
 huobi [options] AMOUNT SOURCE [TARGET...]
+huobi chart [options] SOURCE TARGET
 ```
 
 Examples:
@@ -42,7 +46,19 @@ huobi 100 USD EUR CNY      # EUR and CNY first; with multi_view on, the
                            # default list follows after a blank line + rule
 huobi -u 100 USD           # force-refresh rates, then convert
 huobi -p exchange-api 100 USD EUR   # fetch from exchange-api instead
+
+huobi chart USD CNY --from 2025-01-01 --to 2025-03-31
+                           # terminal chart (kitty/sixel, text fallback)
+huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
+huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.png
 ```
+
+The chart command plots `1 SOURCE = x TARGET` from ECB reference rates.
+`--format` is `csv`, `json`, `png`, or `auto` (terminal image on a TTY,
+CSV otherwise); `--output PATH` writes to a file; `--protocol` forces
+`kitty`, `sixel`, or `text`. The first chart run downloads the ECB full
+history (about 0.6 MB); afterwards everything works offline. Charts have
+no data for weekends/holidays and are never interpolated.
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.
@@ -75,6 +91,10 @@ Config file: `$XDG_CONFIG_HOME/huobi/config.json` (default
 Rates cache: `$XDG_DATA_HOME/huobi/rates.json` (default
 `~/.local/share/huobi/rates.json`), written atomically.
 
+Chart history: `$XDG_DATA_HOME/huobi/history.db` (default
+`~/.local/share/huobi/history.db`), a SQLite database with the ECB
+reference-rate history, written transactionally.
+
 ## Rate providers
 
 Rates are fetched from one of two providers:
@@ -86,6 +106,16 @@ Rates are fetched from one of two providers:
   fallback
 
 Available currencies depend on the selected provider and may change.
+
+## Historical rates
+
+Charts use the ECB reference rates
+([eurofxref-hist.zip](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip),
+updated once per working day around 16:00 CET, for information only).
+The full history is synced into `history.db` on first use and refreshed
+when a requested date range is not covered locally or with `-u/--update`;
+covered ranges never touch the network. Old currency columns and missing
+entries (`N/A`) are handled automatically.
 
 ## License
 
