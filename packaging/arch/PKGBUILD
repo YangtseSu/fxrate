@@ -1,7 +1,7 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 
 pkgname=huobi
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 arch=('x86_64' 'aarch64')
@@ -10,7 +10,7 @@ license=('GPL-3.0-only')
 depends=()
 makedepends=('rust')
 source=("$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('4528c6433d6d46f6ca990734b1aa2ae28e44a36ea96baa1f96e96ffccb971799')
+sha256sums=('579a0cf12024a6d0aef6ff5491d9304703ecbaab804ec23258dc02d947fb3a9f')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
