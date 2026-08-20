@@ -95,7 +95,12 @@ fn convert_works_offline_from_seeded_cache() {
     let out = run(&home, &["100", "USD", "CNY"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("100.00 USD = 709.09 CNY"), "{stdout}");
+    assert!(
+        stdout.contains("$100.00 USD =")
+            && stdout.contains("709.09 CNY")
+            && stdout.contains("\u{1F1E8}\u{1F1F3}"),
+        "{stdout}"
+    );
     assert!(stdout.contains("rates date 2026-08-17"), "{stdout}");
 }
 
@@ -122,7 +127,12 @@ fn convert_date_uses_ecb_historical_rates() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("100.00 USD = 729.88 CNY"), "{stdout}");
+    assert!(
+        stdout.contains("$100.00 USD =")
+            && stdout.contains("729.88 CNY")
+            && stdout.contains("\u{1F1E8}\u{1F1F3}"),
+        "{stdout}"
+    );
     assert!(stdout.contains("rates date 2025-01-02"), "{stdout}");
 }
 
@@ -147,7 +157,12 @@ fn convert_date_weekend_uses_previous_business_day() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("100.00 USD = 730.55 CNY"), "{stdout}");
+    assert!(
+        stdout.contains("$100.00 USD =")
+            && stdout.contains("730.55 CNY")
+            && stdout.contains("\u{1F1E8}\u{1F1F3}"),
+        "{stdout}"
+    );
     assert!(stdout.contains("rates date 2025-01-03"), "{stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("using 2025-01-03"), "{stderr}");

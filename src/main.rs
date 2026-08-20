@@ -5,6 +5,7 @@
 // exchange-rate charts.
 
 mod cli;
+mod currency;
 mod current;
 mod history;
 mod provider;
@@ -144,6 +145,12 @@ fn run_convert(args: ConvertArgs) {
 ///
 /// Shared by the live-rates path and the historical (`--date`) path; the
 /// only differences are the snapshot origin and the `updated` flag.
+/// Render the conversion table and footer for a resolved rate snapshot.
+///
+/// Shared by the live-rates path and the historical (`--date`) path; the
+/// only differences are the snapshot origin and the `updated` flag. Each row
+/// shows the currency symbol before the value, then the code, a flag emoji,
+/// and the English name.
 fn render_convert(
     snapshot: &current::RateSnapshot,
     amount: f64,
@@ -179,43 +186,62 @@ fn render_convert(
         Vec::new()
     };
 
-    let amount_string = format!("{amount:.2}");
-    let padding = amount_string.len() + source.len() + 4;
+    // Width of the right-aligned value column (symbol + number) so decimal
+    // points line up across rows that may carry different-length symbols.
     let value_width = explicit_rows
         .iter()
         .chain(multi_rows.iter())
-        .map(|row| format!("{:.2}", row.value).len())
+        .map(|row| {
+            let m = currency::meta(&row.code);
+            format!("{}{:.2}", m.symbol, row.value).len()
+        })
         .max()
         .unwrap_or(0);
-    let indent = " ".repeat(padding);
-    let value_string = |value: f64| format!("{:>width$.2}", value, width = value_width);
 
-    for (index, row) in explicit_rows.iter().enumerate() {
-        if index == 0 {
-            println!(
-                "{amount_string} {source} = {} {}",
-                value_string(row.value),
-                row.code
-            );
+    let source_meta = currency::meta(source);
+    let amount_string = format!("{}{:.2}", source_meta.symbol, amount);
+    let padding = amount_string.len() + source.len() + 4;
+    let indent = " ".repeat(padding);
+
+    let render_row = |first: bool, row: &Row| -> String {
+        let m = currency::meta(&row.code);
+        let value = format!("{}{:.2}", m.symbol, row.value);
+        let value = format!("{value:>width$}", width = value_width);
+        let mut line = if first {
+            format!("{amount_string} {source} = {value} {}", row.code)
         } else {
-            println!("{indent}{} {}", value_string(row.value), row.code);
+            format!("{indent}{value} {}", row.code)
+        };
+        if !m.flag.is_empty() {
+            line.push(' ');
+            line.push_str(&m.flag);
         }
-    }
+        if !m.name.is_empty() {
+            line.push(' ');
+            line.push_str(&m.name);
+        }
+        line
+    };
+
+    let mut lines: Vec<String> = explicit_rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| render_row(i == 0, row))
+        .collect();
     if !multi_rows.is_empty() {
         if !explicit_rows.is_empty() {
-            println!("{}", "-".repeat(padding + value_width + 4));
+            let sep_len = lines.first().map(|l| l.len()).unwrap_or(padding);
+            lines.push("-".repeat(sep_len));
         }
-        for (index, row) in multi_rows.iter().enumerate() {
-            if index == 0 && explicit_rows.is_empty() {
-                println!(
-                    "{amount_string} {source} = {} {}",
-                    value_string(row.value),
-                    row.code
-                );
-            } else {
-                println!("{indent}{} {}", value_string(row.value), row.code);
-            }
-        }
+        lines.extend(
+            multi_rows
+                .iter()
+                .enumerate()
+                .map(|(i, row)| render_row(i == 0 && explicit_rows.is_empty(), row)),
+        );
+    }
+    for line in &lines {
+        println!("{line}");
     }
     if updated {
         println!("rates updated: {}", snapshot.date);
