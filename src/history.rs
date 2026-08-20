@@ -272,6 +272,55 @@ pub fn rate_series(
     }
     Ok(result)
 }
+/// EUR-based rate for one quote on a single date, or `None` if the date
+/// has no entry (e.g. a weekend/holiday or a currency not yet tracked).
+/// The base currency `EUR` is never stored and is treated as `1.0` by the
+/// caller, so it is not queried here.
+pub fn rate_on_date(
+    conn: &Connection,
+    provider: Provider,
+    quote: &str,
+    date: NaiveDate,
+) -> Result<Option<f64>, Box<dyn Error>> {
+    let mut stmt = conn.prepare(
+        "SELECT rate FROM historical_rates
+         WHERE provider = ?1 AND quote = ?2 AND date = ?3",
+    )?;
+    let mut rows = stmt.query(params![provider.name(), quote, date.to_string()])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row.get(0)?)),
+        None => Ok(None),
+    }
+}
+/// The most recent trading date on or before `date` that has any ECB data
+/// for the provider, or `None` if `date` precedes all available history.
+/// Used to fall back from weekends/holidays to the prior business day.
+pub fn prev_trading_day(
+    conn: &Connection,
+    provider: Provider,
+    date: NaiveDate,
+) -> Result<Option<NaiveDate>, Box<dyn Error>> {
+    let mut stmt = conn.prepare(
+        "SELECT MAX(date) FROM historical_rates
+         WHERE provider = ?1 AND date <= ?2",
+    )?;
+    let mut rows = stmt.query(params![provider.name(), date.to_string()])?;
+    match rows.next()? {
+        Some(row) => {
+            let text: Option<String> = row.get(0)?;
+            match text {
+                Some(text) => {
+                    let parsed = NaiveDate::parse_from_str(&text, "%Y-%m-%d").map_err(|error| {
+                        crate::boxed_error(format!("corrupted history date {text:?}: {error}"))
+                    })?;
+                    Ok(Some(parsed))
+                }
+                None => Ok(None),
+            }
+        }
+        None => Ok(None),
+    }
+}
 
 /// All dates present in the history table within `[from, to]`, ascending.
 /// Used to synthesize the EUR series (rate 1.0 on every trading date).
@@ -502,5 +551,57 @@ mod tests {
         let coverage = coverage_range(&conn, Provider::Ecb).unwrap().unwrap();
         assert_eq!(coverage.start, date("2024-12-02"));
         assert_eq!(coverage.end, date("2025-04-30"));
+    }
+    #[test]
+    fn rate_on_date_returns_stored_value_or_none() {
+        let conn = in_memory_db();
+        let fetched = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
+             VALUES ('ecb', '2025-01-02', 'USD', 1.0322, ?1)",
+            params![fetched],
+        )
+        .unwrap();
+        assert_eq!(
+            rate_on_date(&conn, Provider::Ecb, "USD", date("2025-01-02")).unwrap(),
+            Some(1.0322)
+        );
+        assert_eq!(
+            rate_on_date(&conn, Provider::Ecb, "USD", date("2025-01-03")).unwrap(),
+            None
+        );
+        assert_eq!(
+            rate_on_date(&conn, Provider::Frankfurter, "USD", date("2025-01-02")).unwrap(),
+            None
+        );
+    }
+    #[test]
+    fn prev_trading_day_falls_back_to_last_business_day() {
+        let conn = in_memory_db();
+        let fetched = Utc::now().to_rfc3339();
+        for day in ["2025-01-02", "2025-01-03", "2025-01-06"] {
+            conn.execute(
+                "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
+                 VALUES ('ecb', ?1, 'USD', 1.0, ?2)",
+                params![day, fetched],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            prev_trading_day(&conn, Provider::Ecb, date("2025-01-04")).unwrap(),
+            Some(date("2025-01-03"))
+        );
+        assert_eq!(
+            prev_trading_day(&conn, Provider::Ecb, date("2025-01-05")).unwrap(),
+            Some(date("2025-01-03"))
+        );
+        assert_eq!(
+            prev_trading_day(&conn, Provider::Ecb, date("2025-01-06")).unwrap(),
+            Some(date("2025-01-06"))
+        );
+        assert_eq!(
+            prev_trading_day(&conn, Provider::Ecb, date("2024-01-01")).unwrap(),
+            None
+        );
     }
 }

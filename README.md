@@ -39,6 +39,54 @@ huobi [options] AMOUNT SOURCE [TARGET...]
 huobi chart [options] SOURCE TARGET
 ```
 
+### convert
+
+Convert `AMOUNT` units of `SOURCE` into one or more `TARGET` currencies using
+the locally cached base-EUR rates snapshot. Conversions are fully offline once
+the snapshot is available.
+
+Positional arguments:
+
+- `AMOUNT` — amount to convert; a finite number (e.g. `100`, `12.5`). Required
+- `SOURCE` — source currency code (case-insensitive, e.g. `USD`). Required
+- `TARGET...` — one or more target currency codes. If omitted, the
+  multi-currency view over the configured `currencies` list is shown
+
+Options:
+
+- `-u`, `--update` — force a refresh of the rates snapshot, ignoring cache age
+  (a failed force-refresh exits 1)
+- `-p`, `--provider <name>` — rates source override: `frankfurter` (default)
+  or `exchange-api`. Unknown providers are a usage error (exit 2); this
+  overrides the config `provider` value
+- `-h`, `--help` — show the convert usage and exit 0
+
+### chart
+
+Plots `1 SOURCE = x TARGET` over a date range using ECB reference rates
+(charts are always EUR-based cross rates; the convert providers are unaffected).
+
+Positional arguments:
+
+- `SOURCE` — source currency code (case-insensitive, e.g. `USD`). Required
+- `TARGET` — target currency code (case-insensitive, e.g. `CNY`). Exactly one;
+  extra positional arguments are a usage error (exit 2)
+
+Options:
+
+- `--from <date>` — inclusive start date, `YYYY-MM-DD`. Default: earliest
+  available data
+- `--to <date>` — inclusive end date, `YYYY-MM-DD`. Default: latest available
+  data. Must not be earlier than `--from` (otherwise a usage error, exit 2)
+- `--format <format>` — `csv`, `json`, `text`, or `auto` (default). `auto`
+  emits a text chart on a TTY (or when `--output` is given) and CSV otherwise
+- `--output <path>` — write the chart to a file instead of stdout; with
+  `auto` the file receives the text chart (never terminal escape sequences)
+- `-p`, `--provider <name>` — history source; only `ecb` (default) is
+  accepted. Anything else is a usage error (exit 2)
+- `-u`, `--update` — force re-download of the ECB full history
+- `-h`, `--help` — show the chart usage and exit 0
+
 Examples:
 
 ```sh
@@ -54,12 +102,11 @@ huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
 huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 ```
 
-The chart command plots `1 SOURCE = x TARGET` from ECB reference rates.
-`--format` is `csv`, `json`, `text`, or `auto` (text chart on a TTY,
-CSV otherwise); `--output PATH` writes the chart to a file. The first
-chart run downloads the ECB full history (about 0.6 MB); afterwards
-everything works offline. Charts have no data for weekends/holidays and
-are never interpolated.
+The first chart run downloads the ECB full history (about 0.6 MB); afterwards
+everything works offline. Charts have no data for weekends/holidays and are
+never interpolated. A single trading day prints `1 SOURCE = x TARGET (date)`
+instead of a chart; an empty range (e.g. a weekend with no data) is a runtime
+error (exit 1).
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.

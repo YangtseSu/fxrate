@@ -51,8 +51,7 @@ compatible fresh cache is available.
   `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip`
   (contains `eurofxref-hist.csv`; dates from 1999, values EUR-based, `N/A`
   for missing entries; old currency columns such as EEK/LTL are dynamic)
-- The chart command (`huobi chart`) uses the ECB history exclusively; the
-  convert command never touches it. History is stored per provider in
+- The `huobi chart` command plots from the ECB history, and `huobi` (convert) reads the same ECB history when given `--date`. History is stored per provider in
   SQLite (`history.db`) and is never mixed with the `rates.json` snapshot
 - On first chart use (or when the requested `--from`/`--to` range is not
   covered, or with `-u/--update`) the full CSV is downloaded and upserted
@@ -124,12 +123,12 @@ huobi chart [options] SOURCE TARGET
   already shown as explicit targets are not repeated in the default list
 - The source currency is always excluded
 - `-u`, `--update` — force-refresh rates, ignoring cache age
+- `-d`, `--date <date>` — convert using the ECB historical rate for `YYYY-MM-DD` instead of the live snapshot. The `-p/--provider` selection is ignored (historical rates are always ECB). A weekend/holiday date falls back to the previous ECB business day's rate (noted on stderr); a date with no history at all (before the earliest available) is a runtime error (exit 1); an invalid date format is a usage error (exit 2)
 - `-p`, `--provider <name>` — rates source override: `frankfurter` (default) or
   `exchange-api`. Unknown values or unknown options are usage errors (exit 2)
 - Amounts must parse as finite numbers; missing arguments and invalid amounts
   are usage errors (exit 2). `-h`/`--help` exits 0
-- Exit codes: `0` success · `1` runtime error (fetch failed with no cache,
-  unknown source currency, chart with no history data) · `2` usage error
+- Exit codes: `0` success · `1` runtime error (fetch failed with no cache, unknown source currency, chart with no history data, convert `--date` with no ECB history on or before that date) · `2` usage error
 
 ### Chart command
 
@@ -168,6 +167,7 @@ rates; the convert command and its providers are unaffected).
   `rates date <date>`. When rates were refreshed during the run, the footer is
   `rates updated: <date>` instead, so the update status and date appear only
   once, at the bottom
+- `--date` convert: opens `history.db` and syncs the ECB full history only when the date is not covered by `history_coverage` (or with `-u/--update`). On sync failure it falls back to cached data and exits 1 only when the date is uncovered and no local history exists. Each currency's rate is read from `historical_rates` for the effective date — the requested date if it has ECB data, otherwise the previous ECB business day (a weekend/holiday falls back, noted on stderr; the rate date shown is the effective day). Conversions use the same `amount * rate[dst] / rate[src]` cross formula, with EUR as unity. Only a date with no history at all (before the earliest available) is a runtime error (exit 1)
 - stderr: notices and warnings (skipped currencies, invalid config, failed
   refresh fallback)
 - Chart: on startup, sync the ECB full history when the requested range is
@@ -244,6 +244,7 @@ Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
 - Chart offline paths: seed `history.db` with the same schema the app
   creates (`historical_rates`, `history_coverage`), mark the requested range
   covered, and block the network — a covered range must not attempt a sync
+- Historical `--date` convert: a covered date reuses the cache with no network; an uncovered date tries a sync then exits 1 when no local history exists; a weekend/holiday date falls back to the previous business day (noted on stderr, rate date shown is that day); ECB EUR-based cross math matches `chart`
 - Fresh XDG dirs simulate a first run: config auto-creation, no-cache
   failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache

@@ -20,6 +20,7 @@ pub struct ConvertArgs {
     pub amount: f64,
     pub source: String,
     pub targets: Vec<String>,
+    pub date: Option<NaiveDate>,
 }
 
 pub struct ChartArgs {
@@ -45,6 +46,7 @@ pub fn parse_args() -> Result<Command, i32> {
 fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
     let mut force = false;
     let mut provider = None;
+    let mut date = None;
     let mut positional = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -57,6 +59,18 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
                     return Err(2);
                 };
                 provider = Some(name.clone());
+            }
+            "-d" | "--date" => {
+                let Some(value) = iter.next() else {
+                    eprintln!("error: option {arg} requires a date");
+                    usage();
+                    return Err(2);
+                };
+                date = Some(NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+                    eprintln!("error: invalid date {value:?} (expected YYYY-MM-DD)");
+                    usage();
+                    2
+                })?);
             }
             "-h" | "--help" => {
                 usage();
@@ -109,6 +123,7 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
         amount,
         source,
         targets,
+        date,
     }))
 }
 
@@ -243,8 +258,10 @@ Offline currency converter. With no targets, shows the multi-currency view;
 explicit targets are listed first, followed by the default multi-currency list.
 
 Options:
+  -d, --date <date>       use the ECB historical rate for a date (YYYY-MM-DD)
   -u, --update            force-refresh rates (ignore cache age)
-  -p, --provider <name>   rates source: frankfurter (default) or exchange-api"
+  -p, --provider <name>   rates source: frankfurter (default) or exchange-api
+  -h, --help              show this help and exit 0"
     );
 }
 

@@ -12,12 +12,14 @@ mod render;
 mod series;
 mod storage;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::{self, IsTerminal};
 use std::process;
+use chrono::{NaiveDate, Utc};
 
 use cli::{ChartArgs, Command, ConvertArgs};
 use provider::Provider;
@@ -55,12 +57,17 @@ fn main() {
 }
 
 fn run_convert(args: ConvertArgs) {
+    if let Some(date) = args.date {
+        run_convert_historical(args, date);
+        return;
+    }
     let ConvertArgs {
         force,
         provider: cli_provider,
         amount,
         source,
         targets: explicit,
+        ..
     } = args;
     let config = storage::load_config();
     let provider = match cli_provider {
@@ -130,30 +137,42 @@ fn run_convert(args: ConvertArgs) {
         }
     }
     let snapshot = snapshot.expect("fatal exits when no snapshot is available");
-    if let Err(error) = current::currency_rate(&snapshot, &source) {
+    render_convert(&snapshot, amount, &source, &explicit, &config, updated);
+}
+
+/// Render the conversion table and footer for a resolved rate snapshot.
+///
+/// Shared by the live-rates path and the historical (`--date`) path; the
+/// only differences are the snapshot origin and the `updated` flag.
+fn render_convert(
+    snapshot: &current::RateSnapshot,
+    amount: f64,
+    source: &str,
+    targets: &[String],
+    config: &storage::Config,
+    updated: bool,
+) {
+    if let Err(error) = current::currency_rate(snapshot, source) {
         fatal(&error.to_string());
     }
-
     let convert_list = |list: Vec<String>| {
         list.into_iter()
-            .filter_map(
-                |code| match current::convert(&snapshot, &source, &code, amount) {
-                    Ok(value) => Some(Row { code, value }),
-                    Err(error) => {
-                        eprintln!("warning: {error}, skipped");
-                        None
-                    }
-                },
-            )
+            .filter_map(|code| match current::convert(snapshot, source, &code, amount) {
+                Ok(value) => Some(Row { code, value }),
+                Err(error) => {
+                    eprintln!("warning: {error}, skipped");
+                    None
+                }
+            })
             .collect::<Vec<_>>()
     };
-    let explicit_rows = convert_list(dedupe_targets(&explicit, &source, &[]));
+    let explicit_rows = convert_list(dedupe_targets(targets, source, &[]));
     let multi_rows = if explicit_rows.is_empty() || config.multi_view() {
         let excluded = explicit_rows
             .iter()
             .map(|row| row.code.clone())
             .collect::<Vec<_>>();
-        convert_list(dedupe_targets(config.currencies(), &source, &excluded))
+        convert_list(dedupe_targets(config.currencies(), source, &excluded))
     } else {
         Vec::new()
     };
@@ -201,6 +220,72 @@ fn run_convert(args: ConvertArgs) {
     } else {
         println!("rates date {}", snapshot.date);
     }
+}
+
+/// Historical conversion: resolve EUR-based rates for `date` from the ECB
+/// history database and reuse the live rendering path. The `-p/--provider`
+/// selection is ignored here because historical rates are always ECB.
+fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
+    let provider = Provider::Ecb;
+    let mut conn = match history::open_history_db() {
+        Ok(conn) => conn,
+        Err(error) => fatal(&format!("failed to open history database: {error}")),
+    };
+    let covered = match history::coverage_covers(&conn, provider, date, date) {
+        Ok(covered) => covered,
+        Err(error) => fatal(&format!("failed to check history coverage: {error}")),
+    };
+    if args.force || !covered {
+        match history::sync_history(&mut conn, provider) {
+            Ok(_) => {}
+            Err(error) if !covered => fatal(&format!(
+                "no historical rates available for {date} and update failed: {error}"
+            )),
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to update historical rates: {error}; using cached data"
+                );
+            }
+        }
+    }
+    let effective_date = match history::prev_trading_day(&conn, provider, date) {
+        Ok(Some(effective)) => effective,
+        Ok(None) => fatal(&format!("no historical rates available on or before {date}")),
+        Err(error) => fatal(&format!("failed to read history coverage: {error}")),
+    };
+    if effective_date != date {
+        eprintln!("warning: no ECB rate for {date}; using {effective_date}");
+    }
+    let config = storage::load_config();
+    let explicit = dedupe_targets(&args.targets, &args.source, &[]);
+    let use_multi = explicit.is_empty() || config.multi_view();
+    let mut codes: Vec<String> = explicit.clone();
+    if use_multi {
+        let excluded = codes.clone();
+        codes.extend(dedupe_targets(config.currencies(), &args.source, &excluded));
+    }
+    let mut rates: HashMap<String, f64> = HashMap::new();
+    rates.insert("EUR".to_owned(), 1.0);
+    for code in codes.iter().chain(std::iter::once(&args.source)) {
+        if code == "EUR" {
+            continue;
+        }
+        match history::rate_on_date(&conn, provider, code, effective_date) {
+            Ok(Some(rate)) => {
+                rates.insert(code.clone(), rate);
+            }
+            Ok(None) => {}
+            Err(error) => fatal(&format!("failed to read historical rates: {error}")),
+        }
+    }
+    let snapshot = current::RateSnapshot {
+        base: "EUR".to_owned(),
+        date: effective_date.to_string(),
+        fetched_at: Utc::now(),
+        provider: "ecb".to_owned(),
+        rates,
+    };
+    render_convert(&snapshot, args.amount, &args.source, &args.targets, &config, false);
 }
 
 fn run_chart(args: ChartArgs) {

@@ -112,6 +112,40 @@ fn convert_usage_errors_exit_2() {
 }
 
 #[test]
+fn convert_date_uses_ecb_historical_rates() {
+    let home = temp_home("conv-date");
+    seed_history(&home, "ecb");
+    let out = run(&home, &["--date", "2025-01-02", "100", "USD", "CNY"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("100.00 USD = 729.88 CNY"), "{stdout}");
+    assert!(stdout.contains("rates date 2025-01-02"), "{stdout}");
+}
+
+#[test]
+fn convert_date_without_local_data_and_no_network_exits_1() {
+    let home = temp_home("conv-date-miss");
+    seed_history(&home, "ecb");
+    let out = run(&home, &["--date", "2020-01-01", "100", "USD", "CNY"]);
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn convert_date_weekend_uses_previous_business_day() {
+    let home = temp_home("conv-date-weekend");
+    seed_history(&home, "ecb");
+    // 2025-01-04 is a Saturday; the seeded history has 2025-01-03 as the
+    // prior business day (USD 1.0317, CNY 7.5371 -> 100 USD = 730.55 CNY).
+    let out = run(&home, &["--date", "2025-01-04", "100", "USD", "CNY"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("100.00 USD = 730.55 CNY"), "{stdout}");
+    assert!(stdout.contains("rates date 2025-01-03"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("using 2025-01-03"), "{stderr}");
+}
+
+#[test]
 fn chart_csv_matches_cross_rates_offline() {
     let home = temp_home("csv");
     seed_history(&home, "ecb");
