@@ -12,6 +12,7 @@ mod render;
 mod series;
 mod storage;
 
+use chrono::{NaiveDate, Utc};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
@@ -19,7 +20,6 @@ use std::fmt;
 use std::fs;
 use std::io::{self, IsTerminal};
 use std::process;
-use chrono::{NaiveDate, Utc};
 
 use cli::{ChartArgs, Command, ConvertArgs};
 use provider::Provider;
@@ -157,13 +157,15 @@ fn render_convert(
     }
     let convert_list = |list: Vec<String>| {
         list.into_iter()
-            .filter_map(|code| match current::convert(snapshot, source, &code, amount) {
-                Ok(value) => Some(Row { code, value }),
-                Err(error) => {
-                    eprintln!("warning: {error}, skipped");
-                    None
-                }
-            })
+            .filter_map(
+                |code| match current::convert(snapshot, source, &code, amount) {
+                    Ok(value) => Some(Row { code, value }),
+                    Err(error) => {
+                        eprintln!("warning: {error}, skipped");
+                        None
+                    }
+                },
+            )
             .collect::<Vec<_>>()
     };
     let explicit_rows = convert_list(dedupe_targets(targets, source, &[]));
@@ -242,15 +244,15 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
                 "no historical rates available for {date} and update failed: {error}"
             )),
             Err(error) => {
-                eprintln!(
-                    "warning: failed to update historical rates: {error}; using cached data"
-                );
+                eprintln!("warning: failed to update historical rates: {error}; using cached data");
             }
         }
     }
     let effective_date = match history::prev_trading_day(&conn, provider, date) {
         Ok(Some(effective)) => effective,
-        Ok(None) => fatal(&format!("no historical rates available on or before {date}")),
+        Ok(None) => fatal(&format!(
+            "no historical rates available on or before {date}"
+        )),
         Err(error) => fatal(&format!("failed to read history coverage: {error}")),
     };
     if effective_date != date {
@@ -285,7 +287,14 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
         provider: "ecb".to_owned(),
         rates,
     };
-    render_convert(&snapshot, args.amount, &args.source, &args.targets, &config, false);
+    render_convert(
+        &snapshot,
+        args.amount,
+        &args.source,
+        &args.targets,
+        &config,
+        false,
+    );
 }
 
 fn run_chart(args: ChartArgs) {

@@ -116,7 +116,11 @@ fn convert_date_uses_ecb_historical_rates() {
     let home = temp_home("conv-date");
     seed_history(&home, "ecb");
     let out = run(&home, &["--date", "2025-01-02", "100", "USD", "CNY"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("100.00 USD = 729.88 CNY"), "{stdout}");
     assert!(stdout.contains("rates date 2025-01-02"), "{stdout}");
@@ -137,7 +141,11 @@ fn convert_date_weekend_uses_previous_business_day() {
     // 2025-01-04 is a Saturday; the seeded history has 2025-01-03 as the
     // prior business day (USD 1.0317, CNY 7.5371 -> 100 USD = 730.55 CNY).
     let out = run(&home, &["--date", "2025-01-04", "100", "USD", "CNY"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("100.00 USD = 730.55 CNY"), "{stdout}");
     assert!(stdout.contains("rates date 2025-01-03"), "{stdout}");
