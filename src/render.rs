@@ -116,6 +116,69 @@ fn chart_to_string(chart: &mut Chart<'_>) -> String {
     format!("{chart}")
 }
 
+/// Downsample a date-ascending series to at most `threshold` points with the
+/// Largest-Triangle-Three-Buckets (LTTB) algorithm, always keeping the first
+/// and last points. LTTB selects the point in each bucket that forms the
+/// largest triangle with the previously chosen point and the average of the
+/// next bucket, preserving the visual shape far better than uniform sampling.
+/// X is the day index; it is unevenly spaced because weekends/holidays are
+/// removed from the series, so the triangle areas use the real x values.
+fn lttb(data: &[Point], threshold: usize) -> Vec<Point> {
+    let n = data.len();
+    if threshold >= n || threshold <= 2 {
+        return data.to_vec();
+    }
+    let mut sampled: Vec<Point> = Vec::with_capacity(threshold);
+    let every = (n as f64 - 2.0) / (threshold as f64 - 2.0);
+    sampled.push(data[0]);
+    let mut a = 0usize;
+    for i in 0..threshold - 2 {
+        // Average point (c) of the next bucket.
+        let avg_start = ((i as f64 + 1.0) * every).floor() as usize + 1;
+        let mut avg_end = ((i as f64 + 2.0) * every).floor() as usize + 1;
+        if avg_end > n {
+            avg_end = n;
+        }
+        let avg_len = avg_end - avg_start;
+        let mut avg_x = 0.0f64;
+        let mut avg_y = 0.0f64;
+        for point in data.iter().take(avg_end).skip(avg_start) {
+            avg_x += days(point.0) as f64;
+            avg_y += point.1;
+        }
+        if avg_len > 0 {
+            avg_x /= avg_len as f64;
+            avg_y /= avg_len as f64;
+        } else {
+            // Degenerate final bucket: c is the last point itself.
+            avg_x = days(data[n - 1].0) as f64;
+            avg_y = data[n - 1].1;
+        }
+        // Current bucket range.
+        let range_offs = (i as f64 * every).floor() as usize + 1;
+        let range_to = ((i as f64 + 1.0) * every).floor() as usize + 1;
+        let point_a_x = days(data[a].0) as f64;
+        let point_a_y = data[a].1;
+        let mut max_area = -1.0f64;
+        let mut max_area_point = range_offs;
+        for (j, point) in data.iter().enumerate().take(range_to).skip(range_offs) {
+            // Area of triangle (a, candidate, c) via the shoelace formula.
+            let area = ((point_a_x - avg_x) * (point.1 - point_a_y)
+                - (point_a_x - days(point.0) as f64) * (avg_y - point_a_y))
+                .abs()
+                * 0.5;
+            if area > max_area {
+                max_area = area;
+                max_area_point = j;
+            }
+        }
+        sampled.push(data[max_area_point]);
+        a = max_area_point;
+    }
+    sampled.push(data[n - 1]);
+    sampled
+}
+
 /// Render the series as a text chart with textplots. `cols` is the
 /// terminal width in characters; the canvas is at least 32 dots wide
 /// (16 characters), which textplots requires. The x axis maps dates to
@@ -124,6 +187,18 @@ pub fn render_text(points: &[Point], source: &str, target: &str, cols: usize) ->
     // 16 rows of braille text = 64 dots; TickDisplay::Sparse rounds the
     // canvas height to a multiple of 16, so the two stay in sync.
     const ROWS: u32 = 16;
+    // Braille cells overplot and smear the line ("ghosting") once the series
+    // is denser than the canvas. Beyond 200 points, downsample with LTTB,
+    // which preserves the shape while keeping the first and last dates (and
+    // therefore the x range) intact. CSV/JSON exports stay full-resolution.
+    const MAX_POINTS: usize = 200;
+
+    let sampled: Vec<Point> = if points.len() > MAX_POINTS {
+        lttb(points, MAX_POINTS)
+    } else {
+        points.to_vec()
+    };
+    let points = &sampled;
 
     let (mut x_min, mut x_max) = (days(points[0].0), days(points[points.len() - 1].0));
     if x_min == x_max {
@@ -266,5 +341,53 @@ mod tests {
         assert!(text.contains("2025-01-01"));
         assert!(text.contains("2025-01-03"));
         assert!(has_braille(&text));
+    }
+
+    #[test]
+    fn lttb_returns_full_series_below_threshold() {
+        let points = vec![
+            (date("2025-01-02"), 7.0),
+            (date("2025-01-03"), 7.5),
+            (date("2025-01-06"), 8.0),
+        ];
+        assert_eq!(lttb(&points, 200).len(), 3);
+    }
+
+    #[test]
+    fn lttb_downsamples_and_keeps_endpoints() {
+        // 500 trading days of a sawtooth; dense enough to overplot a braille chart.
+        let mut points = Vec::new();
+        let base = date("2000-01-01");
+        for i in 0..500u32 {
+            let d = base + chrono::Duration::days(i as i64);
+            let rate = 7.0 + ((i % 9) as f64) * 0.13;
+            points.push((d, rate));
+        }
+        let out = lttb(&points, 200);
+        assert_eq!(out.len(), 200);
+        // First and last dates (hence the x range) are preserved.
+        assert_eq!(out[0], points[0]);
+        assert_eq!(*out.last().unwrap(), *points.last().unwrap());
+        // LTTB never reorders or duplicates dates.
+        for w in out.windows(2) {
+            assert!(w[0].0 < w[1].0);
+        }
+    }
+
+    #[test]
+    fn render_text_applies_lttb_above_threshold() {
+        let mut points = Vec::new();
+        let base = date("2000-01-01");
+        for i in 0..500u32 {
+            let d = base + chrono::Duration::days(i as i64);
+            let rate = 7.0 + ((i % 9) as f64) * 0.13;
+            points.push((d, rate));
+        }
+        let text = render_text(&points, "USD", "CNY", 80);
+        assert!(text.starts_with("USD \u{2192} CNY\n"));
+        assert!(has_braille(&text));
+        // Endpoints remain in the frame after downsampling.
+        assert!(text.contains("2000-01-01"));
+        assert!(text.contains("2001-05-14"));
     }
 }
