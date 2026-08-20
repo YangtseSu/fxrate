@@ -12,6 +12,7 @@ offline after the first sync.
 - `-u` / `--update` to force a refresh
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
+- Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day
 - Historical charts (`huobi chart`) from ECB reference rates: a terminal
   text chart (textplots), plus CSV/JSON output
 - XDG-compliant config, cache, and history locations
@@ -59,6 +60,11 @@ Options:
 - `-p`, `--provider <name>` — rates source override: `frankfurter` (default)
   or `exchange-api`. Unknown providers are a usage error (exit 2); this
   overrides the config `provider` value
+- `-d`, `--date <date>` — convert at the ECB historical rate for `YYYY-MM-DD`
+  instead of the live snapshot. A weekend/holiday date falls back to the
+  previous ECB business day (noted on stderr); a date with no history at all
+  is a runtime error (exit 1). The `-p/--provider` selection is ignored
+  (historical rates are always ECB). An invalid date is a usage error (exit 2)
 - `-h`, `--help` — show the convert usage and exit 0
 
 ### chart
@@ -95,6 +101,7 @@ huobi 100 USD EUR CNY      # EUR and CNY first; with multi_view on, the
                            # default list follows after a blank line + rule
 huobi -u 100 USD           # force-refresh rates, then convert
 huobi -p exchange-api 100 USD EUR   # fetch from exchange-api instead
+huobi --date 2025-01-02 100 USD CNY   # convert at a historical ECB rate
 
 huobi chart USD CNY --from 2025-01-01 --to 2025-03-31
                            # terminal text chart
@@ -157,7 +164,7 @@ Available currencies depend on the selected provider and may change.
 
 ## Historical rates
 
-Charts use the ECB reference rates
+- Both `huobi chart` and `huobi --date` use the ECB reference rates
 ([eurofxref-hist.zip](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip),
 updated once per working day around 16:00 CET, for information only).
 The full history is synced into `history.db` on first use and refreshed
