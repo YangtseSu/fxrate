@@ -253,3 +253,5 @@ Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`,
   usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing
   (N/A, old currency columns, trailing commas), EUR cross rates, single-day
   charts, and empty ranges
+
+- CI (`.github/workflows/ci.yml`) gates every push/PR on `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo build --release --locked`, and `cargo test --locked`. Before pushing, run `cargo fmt --all` and commit the resulting changes — use `cargo fmt` (not `rustfmt` directly) so the whole crate and the pinned toolchain match CI. Verify with `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings`; an unformatted commit fails the CI format check and is fixed in a follow-up `style:` commit
