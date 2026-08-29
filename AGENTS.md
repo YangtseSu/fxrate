@@ -147,6 +147,9 @@ fxrate chart [options] SOURCE TARGET
 
 Release flow for a new version:
 
+**Before tagging**: bump the version in `Cargo.toml`, then let cargo refresh `Cargo.lock`'s root entry (edit `Cargo.toml` and run `cargo check --offline`; a hand-edited lock risks mis-firing, and a stale lock breaks `--locked` builds).
+Commit it as `release: set crate version to X.Y.Z` and push — the tag points at that commit, so the release flow's step 1 comes after this one.
+
 1. **Tag first, PKGBUILD after.** The tag points at the last code commit on main; the PKGBUILD bump is a follow-up commit.
    This order is required: the PKGBUILD's `source` is GitHub's archive of the tag, so its sha256 can only be computed after the tag exists
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` — pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the four platform binaries.
@@ -171,7 +174,9 @@ Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `makedepend
 
 Repository rename (done): `gh repo rename fxrate` moved `YangtseSu/huobi` to `YangtseSu/fxrate`; `origin` points at the new SSH URL and GitHub redirects the old name.
 Because GitHub names the archive's top directory after the repository, the `v0.4.1` tarball is now `fxrate-0.4.1/` and its hash differs from the pre-rename one — `sha256sums` in the PKGBUILD was re-recorded for it.
-Release assets published before the rename are still called `huobi-<os>-<arch>`; re-pushing a `v*` tag regenerates them as `fxrate-<os>-<arch>` (`release.yml` uploads with `--clobber`).
+`v0.5.0` is the first release built as `fxrate`: assets `fxrate-<os>-<arch>[.exe]` plus `checksums.txt`, and it is the repository's "Latest" release.
+`v0.3.0`/`v0.4.0`/`v0.4.1` keep their release entries and notes but their assets (`huobi-<os>-<arch>` plus a `checksums.txt` naming those files) were deleted with `gh release delete-asset`.
+Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the tag, which still builds the old name. The per-tag source archives still resolve, so old versions remain installable from source.
 
 ## Testing notes
 
