@@ -6,10 +6,12 @@
 // (units of the quote currency per 1 EUR).
 
 use chrono::{NaiveDate, Utc};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rusqlite::{params, Connection};
 use std::error::Error;
 use std::fs;
 use std::io::Read;
+use std::time::Duration;
 
 use crate::current::{get_bytes, MAX_HISTORY_RESPONSE_SIZE};
 use crate::provider::Provider;
@@ -136,20 +138,67 @@ pub fn parse_ecb_csv(bytes: &[u8]) -> Result<Vec<EcbRow>, Box<dyn Error>> {
     Ok(rows)
 }
 
+/// A stderr progress indicator for history syncs. indicatif hides it
+/// automatically when stderr is not a user-attended terminal, so pipes,
+/// logs, and tests never see escape sequences.
+fn sync_progress(message: &str) -> ProgressBar {
+    let pb = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
+    pb.set_style(
+        ProgressStyle::with_template("[{spinner:.green}] {msg}")
+            .expect("static template is valid")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
+    );
+    pb.set_message(message.to_owned());
+    if !pb.is_hidden() {
+        pb.enable_steady_tick(Duration::from_millis(100));
+    }
+    pb
+}
+
 /// Download the ECB full history and upsert it into the database in a
 /// transaction, then record the covered range. Returns the imported
-/// date span.
+/// date span. On an interactive terminal a spinner on stderr tracks each
+/// phase so a slow first sync is visibly progressing; it is cleared before
+/// an error propagates, so the caller's warning prints cleanly.
 pub fn sync_history(
     conn: &mut Connection,
     provider: Provider,
 ) -> Result<(NaiveDate, NaiveDate), Box<dyn Error>> {
+    let pb = sync_progress("Downloading ECB history");
+    let drawn = !pb.is_hidden();
+    let result = import_ecb_history(conn, provider, &pb);
+    pb.finish_and_clear();
+    if let (Ok((start, end)), true) = (&result, drawn) {
+        // Normal stderr notice, on its own clean line; a hidden bar stays
+        // silent so piped output and logs are unchanged.
+        eprintln!("ECB history synced: {start} to {end}");
+    }
+    result
+}
+
+/// The phase-by-phase body of [`sync_history`], reporting into `pb`.
+fn import_ecb_history(
+    conn: &mut Connection,
+    provider: Provider,
+    pb: &ProgressBar,
+) -> Result<(NaiveDate, NaiveDate), Box<dyn Error>> {
     let bytes = get_bytes(ECB_HIST_URL, MAX_HISTORY_RESPONSE_SIZE)?;
+    pb.set_message("Extracting and parsing ECB history CSV");
     let csv_bytes = extract_ecb_csv(&bytes)?;
     let rows = parse_ecb_csv(&csv_bytes)?;
     if rows.is_empty() {
         return Err(crate::boxed_error("ECB history CSV contained no rates"));
     }
     let fetched_at = Utc::now().to_rfc3339();
+    pb.set_style(
+        ProgressStyle::with_template("[{spinner:.green}] {msg} {bar:24.cyan/blue} {pos}/{len}")
+            .expect("static template is valid")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
+    );
+    // The stderr draw target rate-limits redraws (20 Hz), so ticking every
+    // row stays cheap even for a few hundred thousand upserts.
+    pb.set_length(rows.len() as u64);
+    pb.set_message("Importing rates into history database");
     {
         let tx = conn.transaction()?;
         {
@@ -167,6 +216,7 @@ pub fn sync_history(
                     rate,
                     fetched_at
                 ])?;
+                pb.inc(1);
             }
         }
         tx.commit()?;

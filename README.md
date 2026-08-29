@@ -110,10 +110,12 @@ fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 ```
 
 The first chart run downloads the ECB full history (about 0.6 MB); afterwards
-everything works offline. Charts have no data for weekends/holidays and are
-never interpolated. A single trading day prints `1 SOURCE = x TARGET (date)`
-instead of a chart; an empty range (e.g. a weekend with no data) is a runtime
-error (exit 1).
+everything works offline. On an interactive terminal the sync shows a spinner
+on stderr while it downloads, parses, and imports the rates; when stderr is
+piped or redirected nothing is printed. Charts have no data for
+weekends/holidays and are never interpolated. A single trading day prints
+`1 SOURCE = x TARGET (date)` instead of a chart; an empty range (e.g. a
+weekend with no data) is a runtime error (exit 1).
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.

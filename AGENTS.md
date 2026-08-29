@@ -128,10 +128,12 @@ fxrate chart [options] SOURCE TARGET
   When rates were refreshed during the run, the footer is `rates updated: <date>` instead, so the update status and date appear only once, at the bottom
 - `--date` convert reuses the ECB history path and all of its sync/fallback/error rules documented under the CLI options above (the rendered rate date is the effective, possibly rolled-back day).
   It applies the same `amount * rate[dst] / rate[src]` EUR-based cross formula as `chart`.
-- stderr: notices and warnings (skipped currencies, invalid config, failed refresh fallback)
+- stderr: notices and warnings (skipped currencies, invalid config, failed refresh fallback) and the history-sync progress spinner
 - Chart: on startup, sync the ECB full history when the requested range is not covered by `history_coverage`, when there is no coverage at all, or with `-u/--update`.
   A failed sync warns and falls back to cached data; exit 1 only when no local history exists.
   Covered ranges never touch the network; the coverage check runs only when both `--from` and `--to` are given — a single bound is not separately validated and is clamped to the stored coverage
+- History syncs (chart first run, uncovered ranges, `-u`, and convert `--date` syncs) render an indicatif spinner on stderr showing the phase (download → parse → SQLite import with a row counter) and finish with the synced date range.
+  It is terminal-only: indicatif hides it when stderr is not a user-attended TTY, so piped output, CI, and tests emit nothing
 
 ## Conventions
 
