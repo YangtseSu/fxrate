@@ -1,6 +1,6 @@
 [package]
 name = "fxrate"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 license = "GPL-3.0-only"
