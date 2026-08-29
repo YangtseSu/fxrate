@@ -41,6 +41,9 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
     Box::new(FxrateError(message.into()))
 }
 
+/// Largest allowed gap in days between the last ECB day and the live
+/// snapshot date for the chart's live tail: a weekend plus one holiday.
+const LIVE_TAIL_MAX_GAP_DAYS: i64 = 4;
 fn fatal(message: &str) -> ! {
     eprintln!("error: {message}");
     process::exit(1);
@@ -337,6 +340,20 @@ fn run_chart(args: ChartArgs) {
     let provider =
         Provider::from_name(cli_provider.as_deref().unwrap_or("ecb")).expect("validated by cli");
 
+    // The chart's right edge may extend to the live snapshot's date; that
+    // point is read from the rates cache so chart and convert agree on
+    // today's rate. The cache is used as-is (no fetch here): a missing or
+    // unreadable cache simply disables the live tail.
+    let snapshot = match storage::load_rates() {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) => {
+            if error.downcast_ref::<io::Error>().is_none() {
+                eprintln!("warning: failed to read local rates: {error}");
+            }
+            None
+        }
+    };
+
     let mut conn = match history::open_history_db() {
         Ok(conn) => conn,
         Err(error) => fatal(&format!("failed to open history database: {error}")),
@@ -371,13 +388,55 @@ fn run_chart(args: ChartArgs) {
         fatal("no historical rates available");
     };
     let from = from.unwrap_or(coverage.start);
-    let to = to.unwrap_or(coverage.end);
+    let to_explicit = to.is_some();
+    let mut to = to.unwrap_or(coverage.end);
+
+    // Live tail: when the cached snapshot's rate date reaches the last ECB
+    // day (replacing that point) or extends past it (appending a new
+    // point), the point comes from rates.json — the same EUR-based cross
+    // math the convert command uses — so the chart's right edge matches
+    // convert. The snapshot date must be within LIVE_TAIL_MAX_GAP_DAYS of
+    // the last ECB day: a weekend plus one holiday is the largest plausible
+    // gap, and anything larger means the history is stale, so no splice.
+    let live_date = snapshot
+        .as_ref()
+        .and_then(|snapshot| NaiveDate::parse_from_str(&snapshot.date, "%Y-%m-%d").ok());
+    let live_splice: Option<series::Point> = match (live_date, snapshot.as_ref()) {
+        (Some(live_date), Some(snapshot))
+            if live_date >= from
+                && live_date >= coverage.end
+                && live_date - coverage.end <= chrono::Duration::days(LIVE_TAIL_MAX_GAP_DAYS) =>
+        {
+            // The default range extends to the live date; an explicit
+            // `--to` caps the range, so a live date beyond it is skipped.
+            if !to_explicit && live_date > to {
+                to = live_date;
+            }
+            if live_date > to {
+                None
+            } else {
+                match (
+                    current::currency_rate(snapshot, &source),
+                    current::currency_rate(snapshot, &target),
+                ) {
+                    (Ok(source_rate), Ok(target_rate)) => {
+                        Some((live_date, target_rate / source_rate))
+                    }
+                    (Err(error), _) | (_, Err(error)) => {
+                        eprintln!("warning: {error}; chart ends at {}", coverage.end);
+                        None
+                    }
+                }
+            }
+        }
+        _ => None,
+    };
 
     let universe = match history::date_universe(&conn, provider, from, to) {
         Ok(universe) => universe,
         Err(error) => fatal(&format!("failed to read historical rates: {error}")),
     };
-    if universe.is_empty() {
+    if universe.is_empty() && live_splice.is_none() {
         fatal(&format!("no historical rates between {from} and {to}"));
     }
     let load_series = |quote: &str| -> Vec<series::Point> {
@@ -391,18 +450,25 @@ fn run_chart(args: ChartArgs) {
         }
     };
     let source_series = load_series(&source);
-    if source_series.is_empty() {
+    if source_series.is_empty() && live_splice.is_none() {
         fatal(&format!(
             "no historical rates for {source} between {from} and {to}"
         ));
     }
     let target_series = load_series(&target);
-    if target_series.is_empty() {
+    if target_series.is_empty() && live_splice.is_none() {
         fatal(&format!(
             "no historical rates for {target} between {from} and {to}"
         ));
     }
-    let points = series::cross_series(&source_series, &target_series);
+    let mut points = series::cross_series(&source_series, &target_series);
+    if let Some((live_date, live_rate)) = live_splice {
+        if let Some(point) = points.iter_mut().find(|(date, _)| *date == live_date) {
+            point.1 = live_rate;
+        } else {
+            points.push((live_date, live_rate));
+        }
+    }
     if points.is_empty() {
         fatal(&format!(
             "no overlapping data for {source} and {target} between {from} and {to}"

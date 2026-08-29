@@ -84,7 +84,9 @@ Options:
 - `--from <date>` — inclusive start date, `YYYY-MM-DD`. Default: earliest
   available data
 - `--to <date>` — inclusive end date, `YYYY-MM-DD`. Default: latest available
-  data. Must not be earlier than `--from` (otherwise a usage error, exit 2)
+  data (the last ECB day, extended to the live snapshot date under the
+  live-tail rule). Must not be earlier than `--from` (otherwise a usage
+  error, exit 2)
 - `--format <format>` — `csv`, `json`, `text`, or `auto` (default). `auto`
   emits a text chart on a TTY (or when `--output` is given) and CSV otherwise
 - `--output <path>` — write the chart to a file instead of stdout; with
@@ -118,9 +120,17 @@ above the plot; the chart has an 80×15 canvas by default, replaced by a
 compact label-free chart on terminals shorter than 22 rows, and the box is colored
 (green/red change, bright-black chrome) only on a
 terminal — `NO_COLOR` disables it, and file/pipe output is always plain.
-Charts have no data for weekends/holidays and are never interpolated. A
-single trading day prints `1 SOURCE = x TARGET (date)` instead of a chart; an
-empty range (e.g. a weekend with no data) is a runtime error (exit 1).
+Charts have no data for weekends/holidays and are never interpolated. When
+the range reaches the live snapshot's date — within a weekend-plus-one-
+holiday gap after the last ECB day — that day's point comes from `rates.json`
+(the same EUR-based cross math the convert command uses), so the chart's
+right edge matches `fxrate` convert; the default range extends to it. A
+snapshot dated further back, or a currency missing from it, leaves the chart
+purely ECB. The chart never fetches live rates — it reads the cached
+`rates.json` as-is (run the convert command to refresh it). A single trading
+day (ECB or the live tail) prints `1 SOURCE = x TARGET (date)` instead of a
+chart; an empty range with neither ECB data nor a live point (e.g. a weekend
+with no rates cache) is a runtime error (exit 1).
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.

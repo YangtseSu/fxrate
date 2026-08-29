@@ -88,6 +88,53 @@ fn seed_history(home: &Path, provider: &str) {
     .unwrap();
 }
 
+/// Seed ECB history through 2025-01-10 (a Friday); coverage ends that day.
+fn seed_history_jan10(home: &Path) {
+    let conn = rusqlite::Connection::open(home.join("fxrate").join("history.db")).unwrap();
+    conn.execute_batch(SCHEMA).unwrap();
+    let rows = [
+        ("2025-01-02", 1.0322, 7.5338),
+        ("2025-01-03", 1.0317, 7.5371),
+        ("2025-01-06", 1.0435, 7.6284),
+        ("2025-01-07", 1.0400, 7.6100),
+        ("2025-01-08", 1.0450, 7.6400),
+        ("2025-01-09", 1.0480, 7.6600),
+        ("2025-01-10", 1.0500, 7.6800),
+    ];
+    for (day, usd, cny) in rows {
+        conn.execute(
+            "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
+             VALUES ('ecb', ?1, 'USD', ?2, 't')",
+            rusqlite::params![day, usd],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
+             VALUES ('ecb', ?1, 'CNY', ?2, 't')",
+            rusqlite::params![day, cny],
+        )
+        .unwrap();
+    }
+    conn.execute(
+        "INSERT INTO history_coverage (provider, start_date, end_date, fetched_at)
+         VALUES ('ecb', '2025-01-02', '2025-01-10', 't')",
+        [],
+    )
+    .unwrap();
+}
+
+/// Seed a rates.json snapshot dated `date` (USD 1.06, CNY 7.8 per EUR).
+fn seed_live_rates(home: &Path, date: &str) {
+    let rates = serde_json::json!({
+        "base": "EUR",
+        "date": date,
+        "fetched_at": format!("{date}T12:00:00Z"),
+        "provider": "frankfurter",
+        "rates": {"USD": 1.06, "EUR": 1.0, "CNY": 7.8}
+    });
+    std::fs::write(home.join("fxrate").join("rates.json"), rates.to_string()).unwrap();
+}
+
 #[test]
 fn convert_works_offline_from_seeded_cache() {
     let home = temp_home("convert");
@@ -496,9 +543,60 @@ fn chart_uncovered_range_tries_sync_then_uses_cache_warning() {
 }
 
 #[test]
-fn chart_single_trading_day_prints_one_row() {
-    let home = temp_home("oneday");
-    seed_history(&home, "ecb");
+fn chart_default_range_extends_to_live_saturday() {
+    let home = temp_home("livetail");
+    seed_history_jan10(&home);
+    seed_live_rates(&home, "2025-01-11");
+    // 2025-01-11 is the Saturday after the seeded history; the default
+    // range extends to it using the rates.json cross rate (7.8 / 1.06).
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-11,7.3584905660377355"),
+        "{stdout}"
+    );
+    // The ECB day before the live tail keeps its own value (7.68 / 1.05).
+    assert!(stdout.contains("2025-01-10,7.314285714285714"), "{stdout}");
+    // Default range, covered history: no sync, no warnings.
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("warning"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn chart_live_point_replaces_last_ecb_day() {
+    let home = temp_home("livereplace");
+    seed_history_jan10(&home);
+    // Snapshot dated on the last ECB day itself: that point comes from
+    // rates.json so chart and convert agree on today's rate.
+    seed_live_rates(&home, "2025-01-10");
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-10,7.3584905660377355"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("7.314285714285714"), "{stdout}");
+}
+
+#[test]
+fn chart_single_live_day_prints_one_row() {
+    let home = temp_home("onelive");
+    seed_history_jan10(&home);
+    seed_live_rates(&home, "2025-01-11");
+    // A weekend-only range has no ECB data; the live point alone renders
+    // as the single-day row. The uncovered range still attempts a sync
+    // (blocked here) and falls back to cached history with a warning.
     let out = run(
         &home,
         &[
@@ -506,16 +604,89 @@ fn chart_single_trading_day_prints_one_row() {
             "USD",
             "CNY",
             "--from",
-            "2025-01-03",
+            "2025-01-11",
             "--to",
-            "2025-01-03",
+            "2025-01-11",
             "--format",
             "csv",
         ],
     );
-    assert!(out.status.success());
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "date,rate\n2025-01-03,7.305515169138315\n"
+        "date,rate\n2025-01-11,7.3584905660377355\n"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("using cached data"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn chart_stale_history_skips_live_tail() {
+    let home = temp_home("staletail");
+    seed_history(&home, "ecb");
+    // Snapshot eleven days after the last ECB day: beyond the weekend
+    // plus one holiday gap, so the history is treated as stale and the
+    // live point is not spliced in.
+    seed_live_rates(&home, "2025-01-17");
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-06,7.310397700047915"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("2025-01-17"), "{stdout}");
+}
+
+#[test]
+fn chart_missing_live_currency_warns_and_ends_at_ecb() {
+    let home = temp_home("missinglive");
+    seed_history_jan10(&home);
+    let rates = serde_json::json!({
+        "base": "EUR",
+        "date": "2025-01-11",
+        "fetched_at": "2025-01-11T12:00:00Z",
+        "provider": "frankfurter",
+        "rates": {"USD": 1.06, "EUR": 1.0}
+    });
+    std::fs::write(home.join("fxrate").join("rates.json"), rates.to_string()).unwrap();
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-10,7.314285714285714"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("2025-01-11"), "{stdout}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("no rate for currency CNY (rates date 2025-01-11)"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn chart_default_without_rates_cache_ends_at_coverage() {
+    let home = temp_home("nolivecache");
+    seed_history(&home, "ecb");
+    // No rates.json at all: the default range keeps ending at the last
+    // ECB day, exactly as before the live-tail feature.
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-06,7.310397700047915"),
+        "{stdout}"
     );
 }

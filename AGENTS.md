@@ -37,6 +37,13 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 - Source: ECB reference rates, full history CSV: `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip` (contains `eurofxref-hist.csv`; dates from 1999, values EUR-based, `N/A` for missing entries; old currency columns such as EEK/LTL are dynamic)
 - The `fxrate chart` command plots from the ECB history, and `fxrate` (convert) reads the same ECB history when given `--date`.
   History is stored per provider in SQLite (`history.db`) and is never mixed with the `rates.json` snapshot
+- Chart data split: history comes from `history.db` (ECB); the live tail — the point at the cached snapshot's
+  `rates.json` date — comes from the rates cache so the chart's right edge matches the convert command.
+  When that date is on the last ECB day the ECB point is replaced; when it is after (weekend/holiday) a point
+  is appended and the default range extends to it. The snapshot date must be within 4 days of the last ECB day
+  (a weekend plus one holiday); a larger gap means the history is stale and no splice happens. A snapshot dated
+  before the last ECB day or a currency missing from the snapshot (warned on stderr) also disables the tail.
+  The chart never fetches live rates: it reads `rates.json` as-is (refresh it by running the convert command).
 - On first chart use (or when the requested `--from`/`--to` range is not covered, or with `-u/--update`) the full CSV is downloaded and upserted in a transaction (sync/fallback/error policy is under **Behavior**)
 - `history_coverage` records successfully synced ranges so weekend-only ranges are not mistaken for missing downloads; no weekend/holiday data is fabricated and no interpolation is done
 - Chart points are the per-date intersection of both currencies (both must have data that day), computed as `EUR→target / EUR→source`; EUR is a unity series over the trading-date universe
@@ -108,13 +115,13 @@ fxrate chart [options] SOURCE TARGET
 
 `fxrate chart SOURCE TARGET` plots `1 SOURCE = x TARGET` over a date range using ECB historical reference rates (charts are always EUR-based cross rates; the convert command and its providers are unaffected).
 
-- `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds (default: earliest/latest available data).
+- `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds (default: earliest available data / the last ECB day, extended to the live snapshot date under the live-tail rule).
   Invalid dates or `from > to` are usage errors (exit 2)
 - `--format <csv|json|text|auto>` — `auto` (default): text chart when stdout is a terminal (or when `--output` is given), CSV otherwise.
   `csv`/`json` emit text (`date,rate` rows / `{source, target, points}`); `text` emits the text chart
 - `--output <path>` — write the chart to a file instead of stdout (never emits terminal escape sequences); with `auto` the file gets the text chart
 - `-p`, `--provider <name>` — `ecb` only (default); anything else is a usage error (exit 2)
-- Single trading day → prints `1 SOURCE = x TARGET (date)` instead of a chart; an empty range (e.g. a weekend with no data) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
+- Single trading day (ECB or the live tail) → prints `1 SOURCE = x TARGET (date)` instead of a chart; an empty range with neither ECB data nor a live point (e.g. a weekend with no rates cache) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
 - Terminal charts: a stats panel above a textplots braille chart.
   The panel is a Unicode box titled `SOURCE/TARGET Trend` with Current (with its date),
   High/Low (each with the extreme's date), signed Change (🟢 green up / 🔴 red down, neutral `±0.00%`),
@@ -150,6 +157,7 @@ fxrate chart [options] SOURCE TARGET
 - Chart: on startup, sync the ECB full history when the requested range is not covered by `history_coverage`, when there is no coverage at all, or with `-u/--update`.
   A failed sync warns and falls back to cached data; exit 1 only when no local history exists.
   Covered ranges never touch the network; the coverage check runs only when both `--from` and `--to` are given — a single bound is not separately validated and is clamped to the stored coverage
+  The live tail reads `rates.json` as-is — the chart never fetches live rates, so run the convert command first to refresh the snapshot; a missing or unreadable cache just disables the tail (a missing-currency splice prints a warning with the rates date and the chart ends at the last ECB day)
 - History syncs (chart first run, uncovered ranges, `-u`, and convert `--date` syncs) render an indicatif spinner on stderr showing the phase (download → parse → SQLite import with a row counter) and finish with the synced date range.
   It is terminal-only: indicatif hides it when stderr is not a user-attended TTY, so piped output, CI, and tests emit nothing
 
@@ -202,7 +210,7 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
 
 - Run the full suite with `cargo test --locked` (module unit tests plus `tests/chart.rs` integration tests, which are fully offline: they seed `rates.json` / `history.db` into a fresh XDG home and block the network with `HTTPS_PROXY=http://127.0.0.1:9`)
 - Offline paths: seed a handcrafted `rates.json` (set `fetched_at` to a stale time), include the cached provider when testing provider switching, and block the network, e.g. `HTTPS_PROXY=http://127.0.0.1:9` — refresh fails and the cache fallback is exercised
-- Chart offline paths: seed `history.db` with the same schema the app creates (`historical_rates`, `history_coverage`), mark the requested range covered, and block the network — a covered range must not attempt a sync
+- Chart live tail: seed `rates.json` dated on/after the coverage end (e.g. a Saturday after a Friday) and assert the appended/replaced row equals the snapshot's `rate[target] / rate[source]`; a snapshot more than 4 days after the last ECB day (stale history) must not splice; a currency missing from the snapshot warns on stderr and the chart ends at the last ECB day; a weekend-only range with a snapshot prints the single-day row
 - Historical `--date` convert: a covered date reuses the cache with no network; an uncovered date tries a sync then exits 1 when no local history exists; a weekend/holiday date falls back to the previous business day (noted on stderr, rate date shown is that day); ECB EUR-based cross math matches `chart`
 - Fresh XDG dirs simulate a first run: config auto-creation, no-cache failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache refresh, provider-change refresh, explicit-first ordering/dedup, offline fallback math, force-update failure, interval handling, invalid config, usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing (N/A, old currency columns, trailing commas), EUR cross rates, single-day charts, and empty ranges
