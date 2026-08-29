@@ -13,8 +13,9 @@ offline after the first sync.
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
 - Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day
-- Historical charts (`fxrate chart`) from ECB reference rates: a terminal
-  text chart (textplots), plus CSV/JSON output
+- Historical charts (`fxrate chart`) from ECB reference rates: a stats panel
+  (current, high/low with dates, change, average, volatility) above a
+  terminal-sized text chart (textplots), plus CSV/JSON output
 - XDG-compliant config, cache, and history locations
 
 ## Build
@@ -112,10 +113,13 @@ fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 The first chart run downloads the ECB full history (about 0.6 MB); afterwards
 everything works offline. On an interactive terminal the sync shows a spinner
 on stderr while it downloads, parses, and imports the rates; when stderr is
-piped or redirected nothing is printed. Charts have no data for
-weekends/holidays and are never interpolated. A single trading day prints
-`1 SOURCE = x TARGET (date)` instead of a chart; an empty range (e.g. a
-weekend with no data) is a runtime error (exit 1).
+piped or redirected nothing is printed. The text chart shows a stats box
+above the plot; the chart takes half the terminal height (capped at 25 rows)
+and the box is colored (green/red change, bright-black chrome) only on a
+terminal — `NO_COLOR` disables it, and file/pipe output is always plain.
+Charts have no data for weekends/holidays and are never interpolated. A
+single trading day prints `1 SOURCE = x TARGET (date)` instead of a chart; an
+empty range (e.g. a weekend with no data) is a runtime error (exit 1).
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.

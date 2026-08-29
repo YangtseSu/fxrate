@@ -428,8 +428,15 @@ fn run_chart(args: ChartArgs) {
                     render::fmt_value(rate)
                 )
             } else {
-                let (cols, _) = render::terminal_size();
-                render::render_text(&points, &source, &target, cols as usize)
+                let (cols, rows) = render::terminal_size();
+                // Colors only on an interactive terminal; files and pipes
+                // stay plain, and NO_COLOR turns them off.
+                let color = tty
+                    && output.is_none()
+                    && std::env::var_os("NO_COLOR")
+                        .filter(|v| !v.is_empty())
+                        .is_none();
+                render::render_text(&points, &source, &target, cols as usize, rows as u32, color)
             };
             match output {
                 Some(path) => {

@@ -250,9 +250,14 @@ fn chart_writes_text_file() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = std::fs::read_to_string(&target).unwrap();
-    assert!(text.starts_with("USD \u{2192} CNY\n"));
+    assert!(text.starts_with("╭"));
+    assert!(text.contains("USD/CNY Trend"));
+    assert!(text.contains("Current:"));
+    assert!(text.contains("Change:"));
     assert!(text.contains("2025-01-02"));
     assert!(text.contains("2025-01-06"));
+    // File output must never carry terminal escape sequences.
+    assert!(!text.contains('\u{1b}'));
 }
 
 #[test]
@@ -279,7 +284,11 @@ fn chart_text_format_renders_braille_chart() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("USD \u{2192} CNY\n"));
+    assert!(stdout.starts_with("╭"));
+    assert!(stdout.contains("USD/CNY Trend"));
+    assert!(stdout.contains("Volatility:"));
+    // Piped stdout is not a terminal: colors must stay off.
+    assert!(!stdout.contains('\u{1b}'));
     assert!(stdout
         .chars()
         .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));

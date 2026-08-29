@@ -115,8 +115,17 @@ fxrate chart [options] SOURCE TARGET
 - `--output <path>` — write the chart to a file instead of stdout (never emits terminal escape sequences); with `auto` the file gets the text chart
 - `-p`, `--provider <name>` — `ecb` only (default); anything else is a usage error (exit 2)
 - Single trading day → prints `1 SOURCE = x TARGET (date)` instead of a chart; an empty range (e.g. a weekend with no data) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
-- Terminal charts: a textplots braille chart, 16 rows tall, sized to the terminal width (TIOCGWINSZ, 80×24 fallback).
-  The x axis labels show the start/end dates, the y axis labels show rate values
+- Terminal charts: a stats panel above a textplots braille chart.
+  The panel is a Unicode box titled `SOURCE/TARGET Trend` with Current (with its date),
+  High/Low (each with the extreme's date), signed Change (🟢 green up / 🔴 red down, neutral `±0.00%`),
+  Average, and Volatility `(high − low) / average`; two stat columns when the box fits the
+  terminal width, one stat per line otherwise. The chart takes half the terminal height
+  capped at 25 rows (floor 9; bounded by the rows left under the panel), snapped to a `4k+1` row count so its dot height stays a
+  multiple of 16 for `TickDisplay::Sparse`; it is sized to the terminal width
+  (TIOCGWINSZ, 80×24 fallback). The x axis labels show the start/end dates,
+  the y axis labels show rate values
+- Colors (bright-black borders/axes/labels, green/red change) only when stdout is a TTY
+  and `NO_COLOR` is unset; `--output` files and piped output never contain escape sequences
 
 ## Behavior
 
@@ -188,6 +197,10 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
 - Historical `--date` convert: a covered date reuses the cache with no network; an uncovered date tries a sync then exits 1 when no local history exists; a weekend/holiday date falls back to the previous business day (noted on stderr, rate date shown is that day); ECB EUR-based cross math matches `chart`
 - Fresh XDG dirs simulate a first run: config auto-creation, no-cache failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache refresh, provider-change refresh, explicit-first ordering/dedup, offline fallback math, force-update failure, interval handling, invalid config, usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing (N/A, old currency columns, trailing commas), EUR cross rates, single-day charts, and empty ranges
+- Chart text UI: stats box lines are rectangular by display width (2-cell emoji counted),
+  collapsing to one stat per line on narrow terminals; chart height follows the terminal
+  (24 rows → 13 braille rows, capped 25, floor 9); piped stdout and `--output` files contain
+  no escape sequences
 
 ## CI
 

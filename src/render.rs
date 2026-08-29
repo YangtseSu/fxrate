@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Yangtse Su
 //
-// Chart output: CSV / JSON / text (textplots braille chart), plus
-// terminal size detection for width adaptation.
+// Chart output: CSV / JSON / text (a stats panel above a textplots braille
+// chart sized to the terminal), plus terminal size detection.
 
 use chrono::NaiveDate;
 use textplots::{Chart, LabelBuilder, LabelFormat, Plot, Shape, TickDisplay, TickDisplayBuilder};
 
-use crate::series::Point;
+use crate::series::{stats as series_stats, Point, Stats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -179,19 +179,276 @@ fn lttb(data: &[Point], threshold: usize) -> Vec<Point> {
     sampled
 }
 
-/// Render the series as a text chart with textplots. `cols` is the
-/// terminal width in characters; the canvas is at least 32 dots wide
-/// (16 characters), which textplots requires. The x axis maps dates to
-/// days since epoch, the y axis to the cross rate.
-pub fn render_text(points: &[Point], source: &str, target: &str, cols: usize) -> String {
-    // 16 rows of braille text = 64 dots; TickDisplay::Sparse rounds the
-    // canvas height to a multiple of 16, so the two stay in sync.
-    const ROWS: u32 = 16;
+/// ANSI foregrounds used when coloring is on: bright black for the chrome
+/// (borders, axes, tick labels), green/red for the change cell.
+const DIM: &str = "\x1b[90m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const RESET: &str = "\x1b[0m";
+
+/// Cell width in terminal columns. Everything generated here is ASCII except
+/// box-drawing characters (1 cell each, so plain char counting is right) and
+/// the status emoji (East-Asian wide); the CJK ranges are covered defensively
+/// so panel alignment survives non-ASCII content in future.
+fn char_width(c: char) -> usize {
+    match c as u32 {
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE6F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F000..=0x1FAFF
+        | 0x20000..=0x3FFFD => 2,
+        _ => 1,
+    }
+}
+
+fn display_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+/// One label/value pair of the stats panel. `tint` is the ANSI color for the
+/// value (the change cell); labels are always bright-black when coloring.
+struct StatCell {
+    label: &'static str,
+    value: String,
+    tint: Option<&'static str>,
+}
+
+fn cell_text(cell: &StatCell) -> String {
+    format!("{}: {}", cell.label, cell.value)
+}
+
+fn cell_painted(cell: &StatCell, color: bool) -> String {
+    if !color {
+        return cell_text(cell);
+    }
+    match cell.tint {
+        Some(tint) => format!("{DIM}{}:{RESET} {tint}{}{RESET}", cell.label, cell.value),
+        None => format!("{DIM}{}:{RESET} {}", cell.label, cell.value),
+    }
+}
+
+/// A rounded-rule border with the title set into the dashes (`╭── T ──╮`).
+fn border_rule(left: char, right: char, title: &str, inner_w: usize, color: bool) -> String {
+    let mut line = String::new();
+    line.push(left);
+    let title_w = display_width(title);
+    if title.is_empty() || title_w + 2 > inner_w {
+        line.push_str(&"─".repeat(inner_w));
+    } else {
+        let gap = inner_w - title_w - 2;
+        line.push_str(&"─".repeat(gap / 2));
+        line.push_str(&format!(" {title} "));
+        line.push_str(&"─".repeat(gap - gap / 2));
+    }
+    line.push(right);
+    if color {
+        format!("{DIM}{line}{RESET}")
+    } else {
+        line
+    }
+}
+
+/// Render the stats box shown above the chart: current value (with its date),
+/// high/low with the extreme dates, the signed (green/red) range change, the
+/// average, and the amplitude `(high - low) / average`. Two stat columns when
+/// they fit in `cols`, one stat per line otherwise. Returns the box without a
+/// trailing newline plus its line count.
+fn stats_panel(
+    stats: &Stats,
+    source: &str,
+    target: &str,
+    cols: usize,
+    color: bool,
+) -> (String, usize) {
+    let at = |rate: f64, date: NaiveDate| format!("{} ({})", fmt_value(rate), date);
+    let change = if stats.change_pct > 0.0 {
+        StatCell {
+            label: "Change",
+            value: format!("🟢 +{:.2}%", stats.change_pct),
+            tint: Some(GREEN),
+        }
+    } else if stats.change_pct < 0.0 {
+        StatCell {
+            label: "Change",
+            value: format!("🔴 -{:.2}%", stats.change_pct.abs()),
+            tint: Some(RED),
+        }
+    } else {
+        StatCell {
+            label: "Change",
+            value: "±0.00%".to_owned(),
+            tint: None,
+        }
+    };
+    let cells = [
+        StatCell {
+            label: "Current",
+            value: at(stats.current, stats.current_date),
+            tint: None,
+        },
+        StatCell {
+            label: "Average",
+            value: fmt_value(stats.average),
+            tint: None,
+        },
+        StatCell {
+            label: "High",
+            value: at(stats.high, stats.high_date),
+            tint: None,
+        },
+        StatCell {
+            label: "Low",
+            value: at(stats.low, stats.low_date),
+            tint: None,
+        },
+        change,
+        StatCell {
+            label: "Volatility",
+            value: format!("{:.2}%", stats.volatility_pct),
+            tint: None,
+        },
+    ];
+    let width = |cell: &StatCell| display_width(&cell_text(cell));
+    let pairs = [
+        (&cells[0], &cells[1]),
+        (&cells[2], &cells[3]),
+        (&cells[4], &cells[5]),
+    ];
+    let left_w = pairs.iter().map(|(l, _)| width(l)).max().unwrap_or(0);
+    let two_col_w = pairs
+        .iter()
+        .map(|(_, r)| left_w + 3 + width(r))
+        .max()
+        .unwrap_or(0)
+        + 4; // side padding + borders
+    let (raw, painted): (Vec<String>, Vec<String>) = if two_col_w <= cols.max(32) {
+        let sep = if color {
+            format!("{DIM} | {RESET}")
+        } else {
+            " | ".to_owned()
+        };
+        let raw = pairs
+            .iter()
+            .map(|(l, r)| {
+                format!(
+                    "{}{} | {}",
+                    cell_text(l),
+                    " ".repeat(left_w - width(l)),
+                    cell_text(r)
+                )
+            })
+            .collect();
+        let painted = pairs
+            .iter()
+            .map(|(l, r)| {
+                format!(
+                    "{}{}{sep}{}",
+                    cell_painted(l, color),
+                    " ".repeat(left_w - width(l)),
+                    cell_painted(r, color)
+                )
+            })
+            .collect();
+        (raw, painted)
+    } else {
+        let raw = cells.iter().map(cell_text).collect();
+        let painted = cells.iter().map(|c| cell_painted(c, color)).collect();
+        (raw, painted)
+    };
+
+    let inner_w = raw.iter().map(|l| display_width(l)).max().unwrap_or(0) + 2;
+    let side = if color {
+        format!("{DIM}│{RESET}")
+    } else {
+        "│".to_owned()
+    };
+    let mut out = border_rule(
+        '╭',
+        '╮',
+        &format!("{source}/{target} Trend"),
+        inner_w,
+        color,
+    );
+    for (line_raw, line_painted) in raw.iter().zip(&painted) {
+        let pad = inner_w - 1 - display_width(line_raw);
+        out.push('\n');
+        out.push_str(&format!("{side} {line_painted}{}{side}", " ".repeat(pad)));
+    }
+    out.push('\n');
+    out.push_str(&border_rule('╰', '╯', "", inner_w, color));
+    let rows = painted.len() + 2;
+    (out, rows)
+}
+
+/// Braille rows for the chart: half the terminal height capped at 25 (the
+/// stats panel keeps the other half) and further bounded by what is left
+/// under the panel, floored at 9. Snapped to a `4k+1` row count so the dot
+/// height stays a multiple of 16 — otherwise `TickDisplay::Sparse` rounds
+/// the canvas and the chart silently differs from the requested height.
+fn chart_rows(term_rows: u32, panel_rows: usize) -> u32 {
+    let avail = term_rows.saturating_sub(panel_rows as u32 + 1);
+    let target = (term_rows / 2).min(avail).clamp(9, 25);
+    let k = ((target - 1) as f64 / 4.0).round() as u32;
+    4 * k + 1
+}
+
+/// Wrap every run of axis/label characters (anything that is not braille or
+/// whitespace) in bright black so the plotted line keeps the visual focus.
+fn dim_axes(chart: &str) -> String {
+    let mut out = String::with_capacity(chart.len() + 64);
+    let mut run = String::new();
+    for c in chart.chars() {
+        let keep = c == ' ' || c == '\n' || ('\u{2800}'..='\u{28ff}').contains(&c);
+        if keep {
+            if !run.is_empty() {
+                out.push_str(DIM);
+                out.push_str(&run);
+                out.push_str(RESET);
+                run.clear();
+            }
+            out.push(c);
+        } else {
+            run.push(c);
+        }
+    }
+    if !run.is_empty() {
+        out.push_str(DIM);
+        out.push_str(&run);
+        out.push_str(RESET);
+    }
+    out
+}
+
+/// Render the series as a text chart: the stats box above a textplots braille
+/// chart. `cols`/`rows` are the terminal size; the canvas is at least 32 dots
+/// (16 characters) wide, which textplots requires. The x axis maps dates to
+/// days since epoch, the y axis to the cross rate. `color` emits the ANSI
+/// bright-black chrome and green/red change; callers writing to a file or a
+/// pipe must pass `false`.
+pub fn render_text(
+    points: &[Point],
+    source: &str,
+    target: &str,
+    cols: usize,
+    rows: u32,
+    color: bool,
+) -> String {
     // Braille cells overplot and smear the line ("ghosting") once the series
     // is denser than the canvas. Beyond 200 points, downsample with LTTB,
     // which preserves the shape while keeping the first and last dates (and
     // therefore the x range) intact. CSV/JSON exports stay full-resolution.
     const MAX_POINTS: usize = 200;
+
+    let stats = series_stats(points).expect("render_text requires a non-empty series");
+    let (panel, panel_rows) = stats_panel(&stats, source, target, cols, color);
 
     let sampled: Vec<Point> = if points.len() > MAX_POINTS {
         lttb(points, MAX_POINTS)
@@ -236,6 +493,7 @@ pub fn render_text(points: &[Point], source: &str, target: &str, cols: usize) ->
         date.format("%Y-%m-%d").to_string()
     };
     let width = (cols as u32).max(32) * 2;
+    let dot_height = (chart_rows(rows, panel_rows) - 1) * 4;
     let shape = if points.len() == 1 {
         Shape::Points(&data)
     } else {
@@ -246,7 +504,7 @@ pub fn render_text(points: &[Point], source: &str, target: &str, cols: usize) ->
     let chart = chart_to_string(
         Chart::new_with_y_range(
             width,
-            ROWS * 4,
+            dot_height,
             x_min as f32,
             x_max as f32,
             y_min as f32,
@@ -259,7 +517,8 @@ pub fn render_text(points: &[Point], source: &str, target: &str, cols: usize) ->
         .y_tick_display(TickDisplay::Sparse)
         .lineplot(&shape),
     );
-    format!("{source} \u{2192} {target}\n{chart}")
+    let chart = if color { dim_axes(&chart) } else { chart };
+    format!("{panel}\n{chart}")
 }
 
 #[cfg(test)]
@@ -304,22 +563,25 @@ mod tests {
     }
 
     #[test]
-    fn text_chart_has_title_frame_labels_and_range() {
+    fn text_chart_has_panel_frame_labels_and_range() {
         let points = vec![
             (date("2025-01-02"), 7.0),
             (date("2025-01-03"), 7.5),
             (date("2025-01-06"), 8.0),
             (date("2025-01-07"), 7.2),
         ];
-        let text = render_text(&points, "USD", "CNY", 60);
-        assert!(text.starts_with("USD \u{2192} CNY\n"));
+        let text = render_text(&points, "USD", "CNY", 60, 24, false);
+        assert!(text.starts_with("╭"));
+        assert!(text.contains("USD/CNY Trend"));
+        assert!(text.contains("Current: 7.2 (2025-01-07)"));
+        assert!(text.contains("High: 8 (2025-01-06)"));
+        assert!(text.contains("Low: 7 (2025-01-02)"));
+        assert!(text.contains("Average: 7.425"));
+        assert!(text.contains("Change: 🟢 +2.86%"));
+        assert!(text.contains("Volatility: 13.47%"));
         assert!(has_braille(&text));
-        assert!(text.contains("2025-01-02"));
-        assert!(text.contains("2025-01-07"));
-        assert!(text.contains("8"));
-        assert!(text.contains("7"));
         let lines: Vec<&str> = text.lines().collect();
-        // title + 17 braille rows + x-axis label line
+        // panel (2 rules + 3 stat lines) + 13 braille rows + x-axis labels
         assert_eq!(lines.len(), 19);
         assert!(lines.iter().all(|line| line.chars().count() <= 68));
     }
@@ -327,7 +589,7 @@ mod tests {
     #[test]
     fn text_chart_handles_flat_series() {
         let points = vec![(date("2025-01-02"), 7.3), (date("2025-01-03"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 40);
+        let text = render_text(&points, "USD", "CNY", 40, 24, false);
         // Axis padded around the flat value: 7.3 ± 5%.
         assert!(text.contains("7.665"));
         assert!(text.contains("6.935"));
@@ -336,11 +598,72 @@ mod tests {
     #[test]
     fn text_chart_handles_single_point() {
         let points = vec![(date("2025-01-02"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 40);
+        let text = render_text(&points, "USD", "CNY", 40, 24, false);
         // The x range is widened around the single point.
         assert!(text.contains("2025-01-01"));
         assert!(text.contains("2025-01-03"));
         assert!(has_braille(&text));
+    }
+
+    #[test]
+    fn display_width_counts_wide_emoji_twice() {
+        assert_eq!(display_width("USD/CNY Trend"), 13);
+        assert_eq!(display_width("Change: 🔴 -1.24%"), 17);
+    }
+
+    #[test]
+    fn panel_is_rectangular_and_collapses_to_one_column() {
+        let points = vec![
+            (date("2025-01-02"), 7.0),
+            (date("2025-01-03"), 7.5),
+            (date("2025-01-06"), 6.8),
+        ];
+        let wide = render_text(&points, "USD", "CNY", 60, 24, false);
+        let panel: Vec<&str> = wide.lines().take(5).collect();
+        let width = display_width(panel[0]);
+        assert!(panel.iter().all(|line| display_width(line) == width));
+        assert!(panel[1].contains(" | ")); // two columns fit
+        assert!(panel[3].contains("🔴 -2.86%")); // down over the range
+
+        let narrow = render_text(&points, "USD", "CNY", 40, 24, false);
+        let panel: Vec<&str> = narrow.lines().take(9).collect();
+        let width = display_width(panel[0]);
+        assert!(panel
+            .iter()
+            .take(8)
+            .all(|line| display_width(line) == width));
+        // one stat per line (rules + 6 stats); the 9th line is chart output
+        assert!(panel[7].starts_with('╰'));
+        assert!(panel[1..7].iter().all(|line| line.starts_with('│')));
+        assert!(!panel.iter().any(|line| line.contains(" | ")));
+    }
+
+    #[test]
+    fn chart_height_adapts_to_terminal() {
+        let base = date("2025-01-02");
+        let points: Vec<Point> = (0..60)
+            .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.01))
+            .collect();
+        let braille_rows = |rows: u32| {
+            render_text(&points, "USD", "CNY", 60, rows, false)
+                .lines()
+                .filter(|line| has_braille(line))
+                .count()
+        };
+        assert_eq!(braille_rows(24), 13); // about half the terminal
+        assert_eq!(braille_rows(80), 25); // capped at 25
+        assert_eq!(braille_rows(10), 9); // floor
+    }
+
+    #[test]
+    fn color_dims_chrome_and_tints_change() {
+        let down = vec![(date("2025-01-02"), 7.5), (date("2025-01-03"), 7.0)];
+        let text = render_text(&down, "USD", "CNY", 60, 24, true);
+        assert!(text.contains("\u{1b}[90m")); // borders and axes are bright black
+        assert!(text.contains("\u{1b}[31m🔴 -6.67%"));
+        let up = vec![(date("2025-01-02"), 7.0), (date("2025-01-03"), 7.2)];
+        assert!(render_text(&up, "USD", "CNY", 60, 24, true).contains("\u{1b}[32m🟢 +2.86%"));
+        assert!(!render_text(&up, "USD", "CNY", 60, 24, false).contains('\u{1b}'));
     }
 
     #[test]
@@ -383,8 +706,8 @@ mod tests {
             let rate = 7.0 + ((i % 9) as f64) * 0.13;
             points.push((d, rate));
         }
-        let text = render_text(&points, "USD", "CNY", 80);
-        assert!(text.starts_with("USD \u{2192} CNY\n"));
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        assert!(text.starts_with("╭"));
         assert!(has_braille(&text));
         // Endpoints remain in the frame after downsampling.
         assert!(text.contains("2000-01-01"));
