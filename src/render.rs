@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Yangtse Su
 //
-// Chart output: CSV / JSON / text (a stats panel above a textplots braille
-// chart sized to the terminal), plus terminal size detection.
+// chart on a fixed 80×15 canvas).
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use textplots::{Chart, LabelBuilder, LabelFormat, Plot, Shape, TickDisplay, TickDisplayBuilder};
 
 use crate::series::{stats as series_stats, Point, Stats};
@@ -85,24 +84,13 @@ pub fn fmt_value(value: f64) -> String {
     out
 }
 
-/// Terminal size in columns and rows via TIOCGWINSZ, falling back to
-/// 80x24 when unavailable (including non-Unix platforms).
+/// Terminal size in columns and rows via the `terminal_size` crate, falling
+/// back to 80x24 when it is unavailable (e.g. not attached to a terminal).
 pub fn terminal_size() -> (u16, u16) {
-    #[cfg(unix)]
-    {
-        // SAFETY: ws is written by the ioctl before we read it, and the
-        // pointer is valid for the duration of the call.
-        let mut ws = std::mem::MaybeUninit::<libc::winsize>::uninit();
-        let result = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, ws.as_mut_ptr()) };
-        if result == 0 {
-            // SAFETY: ioctl success means ws is initialized.
-            let ws = unsafe { ws.assume_init() };
-            if ws.ws_col > 0 && ws.ws_row > 0 {
-                return (ws.ws_col, ws.ws_row);
-            }
-        }
+    match terminal_size::terminal_size() {
+        Some((width, height)) if width.0 > 0 && height.0 > 0 => (width.0, height.0),
+        _ => (80, 24),
     }
-    (80, 24)
 }
 
 /// Draw a chart's axes and figures and return the labeled frame as a
@@ -388,18 +376,6 @@ fn stats_panel(
     (out, rows)
 }
 
-/// Braille rows for the chart: half the terminal height capped at 25 (the
-/// stats panel keeps the other half) and further bounded by what is left
-/// under the panel, floored at 9. Snapped to a `4k+1` row count so the dot
-/// height stays a multiple of 16 — otherwise `TickDisplay::Sparse` rounds
-/// the canvas and the chart silently differs from the requested height.
-fn chart_rows(term_rows: u32, panel_rows: usize) -> u32 {
-    let avail = term_rows.saturating_sub(panel_rows as u32 + 1);
-    let target = (term_rows / 2).min(avail).clamp(9, 25);
-    let k = ((target - 1) as f64 / 4.0).round() as u32;
-    4 * k + 1
-}
-
 /// Wrap every run of axis/label characters (anything that is not braille or
 /// whitespace) in bright black so the plotted line keeps the visual focus.
 fn dim_axes(chart: &str) -> String {
@@ -426,13 +402,223 @@ fn dim_axes(chart: &str) -> String {
     }
     out
 }
+/// Smallest "nice" step (1, 2, or 5 times a power of ten) that is at least
+/// `raw`, so y-axis tick labels land on round values.
+fn nice_step(raw: f64) -> f64 {
+    let pow = 10f64.powf(raw.log10().floor());
+    let unit = raw / pow;
+    let mult = if unit <= 1.0 {
+        1.0
+    } else if unit <= 2.0 {
+        2.0
+    } else if unit <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    mult * pow
+}
+
+/// Build the two lines that replace textplots' single x-axis label line: a
+/// row of `+` tick marks under the canvas, then the date labels. The first
+/// and last dates stay at the edges; intermediate ticks are month starts
+/// (ranges of two months or more), Mondays (two weeks to two months), or
+/// every third day (shorter ranges), thinned so the labels never overlap.
+fn x_axis_lines(x_min: f64, x_max: f64, cols: usize) -> (String, String) {
+    const LABEL_W: usize = 10; // YYYY-MM-DD
+    let day0 = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let date_at = |x: f64| day0 + chrono::Duration::days(x.round() as i64);
+    let first = date_at(x_min);
+    let last = date_at(x_max);
+    let col_of = |date: NaiveDate| -> usize {
+        let frac = (days(date) as f64 - x_min) / (x_max - x_min);
+        ((frac * (cols - 1) as f64).round() as usize).min(cols - 1)
+    };
+    let next_month = |date: NaiveDate| -> NaiveDate {
+        if date.month() == 12 {
+            NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(date.year(), date.month() + 1, 1)
+        }
+        .expect("valid month start")
+    };
+    let mut candidates: Vec<NaiveDate> = Vec::new();
+    let range_days = x_max - x_min;
+    if range_days >= 60.0 {
+        let mut d = next_month(first);
+        while d < last {
+            candidates.push(d);
+            d = next_month(d);
+        }
+    } else if range_days >= 15.0 {
+        let mut d = first + chrono::Duration::days(1);
+        while d.weekday() != chrono::Weekday::Mon {
+            d += chrono::Duration::days(1);
+        }
+        while d < last {
+            candidates.push(d);
+            d += chrono::Duration::days(7);
+        }
+    } else {
+        let mut d = first + chrono::Duration::days(3);
+        while d < last {
+            candidates.push(d);
+            d += chrono::Duration::days(3);
+        }
+    }
+    // Greedy selection: keep a candidate only when its centered label
+    // clears the previous one by two columns and leaves room for the
+    // right-aligned end label.
+    let mut ticks: Vec<(NaiveDate, usize)> = vec![(first, 0)];
+    let mut prev_end = LABEL_W - 1;
+    let last_start = cols - LABEL_W;
+    for date in candidates {
+        let col = col_of(date);
+        let start = col.saturating_sub(LABEL_W / 2);
+        if start >= prev_end + 2 && start + LABEL_W + 2 <= last_start {
+            ticks.push((date, col));
+            prev_end = start + LABEL_W - 1;
+        }
+    }
+    ticks.push((last, cols - 1));
+
+    let mut marks = vec![' '; cols];
+    let mut labels = vec![' '; cols];
+    for (date, col) in &ticks {
+        marks[*col] = '+';
+        let s = date.format("%Y-%m-%d").to_string();
+        let start = if *col == 0 {
+            0
+        } else if *col == cols - 1 {
+            cols - LABEL_W
+        } else {
+            col - LABEL_W / 2
+        };
+        for (i, c) in s.chars().enumerate() {
+            labels[start + i] = c;
+        }
+    }
+    (marks.into_iter().collect(), labels.into_iter().collect())
+}
+
+/// Swap textplots' single `xmin xmax` label line for the tick mark and
+/// date label lines built by `x_axis_lines`.
+fn replace_x_axis(chart: &str, marks: &str, labels: &str) -> String {
+    let body = chart.trim_end_matches('\n');
+    let (body, _) = body
+        .rsplit_once('\n')
+        .expect("chart ends with an x-axis line");
+    format!("{body}\n{marks}\n{labels}")
+}
+/// Sparkline block characters, lowest to highest.
+const SPARK: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+/// Compact chart for terminals too short for the full output: the braille
+/// plot with only the ymax/ymin values labeled — no tick marks, no x axis.
+fn mini_chart(
+    points: &[Point],
+    cols: usize,
+    rows: u32,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> String {
+    let data: Vec<(f32, f32)> = points
+        .iter()
+        .map(|(date, rate)| (days(*date) as f32, *rate as f32))
+        .collect();
+    let shape = if points.len() == 1 {
+        Shape::Points(&data)
+    } else {
+        Shape::Lines(&data)
+    };
+    let chart = chart_to_string(
+        Chart::new_with_y_range(
+            cols as u32 * 2,
+            (rows - 1) * 4,
+            x_min as f32,
+            x_max as f32,
+            y_min as f32,
+            y_max as f32,
+        )
+        .y_label_format(LabelFormat::Custom(Box::new(|value| {
+            fmt_value(value as f64)
+        })))
+        .y_tick_display(TickDisplay::None)
+        .lineplot(&shape),
+    );
+    // Drop the x-axis line textplots always appends; the ymin label line
+    // and the ymax label on the first braille row stay.
+    let body = chart.trim_end_matches('\n');
+    let (body, _) = body
+        .rsplit_once('\n')
+        .expect("chart ends with an x-axis line");
+    format!("{body}\n")
+}
+
+/// One-line sparkline of the series: one block character per column, each
+/// column averaging the points in its x-range (empty columns carry the last
+/// value forward), normalized over the data range. Used on terminals too
+/// short for the full chart.
+fn sparkline(points: &[Point], cols: usize) -> String {
+    if cols == 0 {
+        return String::new();
+    }
+    let x_min = days(points[0].0) as f64;
+    let x_max = days(points[points.len() - 1].0) as f64;
+    let (mut y_min, mut y_max) = points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), point| {
+            (lo.min(point.1), hi.max(point.1))
+        });
+    if y_max <= y_min {
+        y_min -= 1.0;
+        y_max += 1.0;
+    }
+    let mut out = String::with_capacity(cols);
+    let mut last = points[0].1;
+    let mut i = 0usize;
+    for col in 0..cols {
+        let lo = x_min + (x_max - x_min) * col as f64 / cols as f64;
+        let hi = x_min + (x_max - x_min) * (col + 1) as f64 / cols as f64;
+        let mut sum = 0.0;
+        let mut n = 0usize;
+        while i < points.len() && (days(points[i].0) as f64) < hi {
+            if days(points[i].0) as f64 >= lo {
+                sum += points[i].1;
+                n += 1;
+            }
+            i += 1;
+        }
+        let value = if n > 0 { sum / n as f64 } else { last };
+        last = value;
+        let level = ((value - y_min) / (y_max - y_min) * 7.0)
+            .round()
+            .clamp(0.0, 7.0) as usize;
+        out.push(SPARK[level]);
+    }
+    out
+}
+
+/// Default chart canvas size in terminal columns (dots are twice this) and
+/// braille rows: 80×15 keeps the whole output (stats panel + chart + two
+/// axis-label lines) at 22 lines; terminals too short for that get a compact
+/// label-free chart, or a one-line sparkline on very short terminals.
+const CHART_COLS: usize = 80;
+const CHART_ROWS: u32 = 15;
+/// Columns reserved on the right for the y-axis labels that trail the braille
+/// rows, so they never wrap on a terminal exactly as wide as the canvas.
+const Y_LABEL_W: usize = 9;
 
 /// Render the series as a text chart: the stats box above a textplots braille
-/// chart. `cols`/`rows` are the terminal size; the canvas is at least 32 dots
-/// (16 characters) wide, which textplots requires. The x axis maps dates to
-/// days since epoch, the y axis to the cross rate. `color` emits the ANSI
-/// bright-black chrome and green/red change; callers writing to a file or a
-/// pipe must pass `false`.
+/// chart on an 80×15 canvas (smaller when the terminal cannot fit the whole
+/// 22-line output). `cols`/`rows` are the terminal size; the canvas is never
+/// wider than the terminal. The x axis maps dates to days since epoch and
+/// shows tick marks with date labels at aligned dates (month starts, Mondays,
+/// or every few days depending on the range); the y axis shows the cross rate
+/// with dense ticks at round values. `color` emits the ANSI bright-black
+/// chrome and green/red change; callers writing to a file or a pipe must pass
+/// `false`.
 pub fn render_text(
     points: &[Point],
     source: &str,
@@ -448,8 +634,13 @@ pub fn render_text(
     const MAX_POINTS: usize = 200;
 
     let stats = series_stats(points).expect("render_text requires a non-empty series");
-    let (panel, panel_rows) = stats_panel(&stats, source, target, cols, color);
-
+    let chart_cols = CHART_COLS.min(cols.saturating_sub(Y_LABEL_W)).max(16);
+    let (panel, panel_rows) = stats_panel(&stats, source, target, chart_cols, color);
+    // Terminals too short for the full output (panel + 15 braille rows + two
+    // axis-label lines: 22 rows with the standard panel) get a compact chart
+    // without axis labels; when even that cannot fit, a one-line sparkline.
+    // Two spare rows keep the shell prompt from pushing the panel's top off
+    // the screen.
     let sampled: Vec<Point> = if points.len() > MAX_POINTS {
         lttb(points, MAX_POINTS)
     } else {
@@ -483,17 +674,46 @@ pub fn render_text(
         y_max += pad;
     }
 
+    if rows < panel_rows as u32 + CHART_ROWS + 4 {
+        let avail = rows.saturating_sub(panel_rows as u32 + 1);
+        if avail >= 3 {
+            let chart = mini_chart(
+                points,
+                chart_cols,
+                avail.min(9),
+                x_min as f64,
+                x_max as f64,
+                y_min,
+                y_max,
+            );
+            let chart = if color { dim_axes(&chart) } else { chart };
+            return format!("{panel}\n{chart}");
+        }
+        return format!("{panel}\n{}", sparkline(points, chart_cols.min(40)));
+    }
+
+    // Snap the padded range to a ladder of "nice" steps (1/2/5 × 10^k) so
+    // the dense y tick labels are round values (7.6, 7.4, ...) instead of
+    // arbitrary slices, while the axis still covers the data.
+    let dot_height = (CHART_ROWS - 1) * 4;
+    let num_steps = dot_height / 8; // TickDisplay::Dense labels every 2nd row
+    let mut step = nice_step((y_max - y_min) / num_steps as f64);
+    loop {
+        let top = (y_max / step).ceil();
+        let bottom = (top - num_steps as f64) * step;
+        if bottom <= y_min {
+            y_min = bottom;
+            y_max = top * step;
+            break;
+        }
+        step = nice_step(step * 2.0);
+    }
+
     let data: Vec<(f32, f32)> = points
         .iter()
         .map(|(date, rate)| (days(*date) as f32, *rate as f32))
         .collect();
-    let x_label = |value: f32| -> String {
-        let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
-            + chrono::Duration::days(value.round() as i64);
-        date.format("%Y-%m-%d").to_string()
-    };
-    let width = (cols as u32).max(32) * 2;
-    let dot_height = (chart_rows(rows, panel_rows) - 1) * 4;
+    let width = chart_cols as u32 * 2;
     let shape = if points.len() == 1 {
         Shape::Points(&data)
     } else {
@@ -510,19 +730,21 @@ pub fn render_text(
             y_min as f32,
             y_max as f32,
         )
-        .x_label_format(LabelFormat::Custom(Box::new(x_label)))
         .y_label_format(LabelFormat::Custom(Box::new(|value| {
             fmt_value(value as f64)
         })))
-        .y_tick_display(TickDisplay::Sparse)
+        .y_tick_display(TickDisplay::Dense)
         .lineplot(&shape),
     );
+    let (marks, labels) = x_axis_lines(x_min as f64, x_max as f64, chart_cols);
+    let chart = replace_x_axis(&chart, &marks, &labels);
     let chart = if color { dim_axes(&chart) } else { chart };
     format!("{panel}\n{chart}")
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn date(s: &str) -> NaiveDate {
@@ -570,7 +792,7 @@ mod tests {
             (date("2025-01-06"), 8.0),
             (date("2025-01-07"), 7.2),
         ];
-        let text = render_text(&points, "USD", "CNY", 60, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
         assert!(text.starts_with("╭"));
         assert!(text.contains("USD/CNY Trend"));
         assert!(text.contains("Current: 7.2 (2025-01-07)"));
@@ -581,28 +803,58 @@ mod tests {
         assert!(text.contains("Volatility: 13.47%"));
         assert!(has_braille(&text));
         let lines: Vec<&str> = text.lines().collect();
-        // panel (2 rules + 3 stat lines) + 13 braille rows + x-axis labels
-        assert_eq!(lines.len(), 19);
-        assert!(lines.iter().all(|line| line.chars().count() <= 68));
+        // panel (2 rules + 3 stat lines) + 15 braille rows + tick marks + labels
+        assert_eq!(lines.len(), 22);
+        assert!(lines.iter().all(|line| line.chars().count() <= 90));
+        // x axis: the short 5-day range gets an intermediate tick every 3 days
+        assert_eq!(lines[20].chars().filter(|&c| c == '+').count(), 3);
+        assert!(lines[21].contains("2025-01-05"));
     }
 
     #[test]
     fn text_chart_handles_flat_series() {
         let points = vec![(date("2025-01-02"), 7.3), (date("2025-01-03"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 40, 24, false);
-        // Axis padded around the flat value: 7.3 ± 5%.
-        assert!(text.contains("7.665"));
-        assert!(text.contains("6.935"));
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        // The axis snaps to a nice ladder around the flat value: 6.4..7.8
+        // in 0.2 steps, with the padded range 7.3 ± 5% inside it.
+        assert!(text.contains("7.6"));
+        assert!(text.contains("6.4"));
     }
 
     #[test]
     fn text_chart_handles_single_point() {
         let points = vec![(date("2025-01-02"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 40, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
         // The x range is widened around the single point.
         assert!(text.contains("2025-01-01"));
         assert!(text.contains("2025-01-03"));
         assert!(has_braille(&text));
+    }
+
+    #[test]
+    fn x_axis_shows_intermediate_ticks_and_labels() {
+        let base = date("2025-01-01");
+        let points: Vec<Point> = (0..200)
+            .map(|i| {
+                (
+                    base + chrono::Duration::days(i),
+                    7.0 + ((i % 9) as f64) * 0.05,
+                )
+            })
+            .collect();
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let lines: Vec<&str> = text.lines().collect();
+        let (marks, labels) = (lines[lines.len() - 2], lines[lines.len() - 1]);
+        // Month-start ticks inside the range, thinned to 12-column spacing;
+        // the 71-column canvas (80 minus the y-label reserve) keeps 03-01,
+        // 04-01, 06-01 between the 2025-01-01 and 2025-07-19 endpoints.
+        assert_eq!(marks.chars().filter(|&c| c == '+').count(), 5);
+        assert_eq!(marks.chars().count(), 71);
+        assert_eq!(labels.chars().count(), 71);
+        assert!(labels.contains("2025-03-01"));
+        assert!(labels.contains("2025-06-01"));
+        assert!(labels.contains("2025-01-01")); // endpoints survive
+        assert!(labels.contains("2025-07-19"));
     }
 
     #[test]
@@ -612,58 +864,95 @@ mod tests {
     }
 
     #[test]
-    fn panel_is_rectangular_and_collapses_to_one_column() {
+    fn panel_is_rectangular_with_two_columns() {
         let points = vec![
             (date("2025-01-02"), 7.0),
             (date("2025-01-03"), 7.5),
             (date("2025-01-06"), 6.8),
         ];
-        let wide = render_text(&points, "USD", "CNY", 60, 24, false);
-        let panel: Vec<&str> = wide.lines().take(5).collect();
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let panel: Vec<&str> = text.lines().take(5).collect();
         let width = display_width(panel[0]);
         assert!(panel.iter().all(|line| display_width(line) == width));
-        assert!(panel[1].contains(" | ")); // two columns fit
+        assert!(panel[1].contains(" | ")); // two columns fit the fixed width
         assert!(panel[3].contains("🔴 -2.86%")); // down over the range
-
-        let narrow = render_text(&points, "USD", "CNY", 40, 24, false);
-        let panel: Vec<&str> = narrow.lines().take(9).collect();
-        let width = display_width(panel[0]);
-        assert!(panel
-            .iter()
-            .take(8)
-            .all(|line| display_width(line) == width));
-        // one stat per line (rules + 6 stats); the 9th line is chart output
-        assert!(panel[7].starts_with('╰'));
-        assert!(panel[1..7].iter().all(|line| line.starts_with('│')));
-        assert!(!panel.iter().any(|line| line.contains(" | ")));
     }
 
     #[test]
-    fn chart_height_adapts_to_terminal() {
+    fn chart_has_fixed_size() {
         let base = date("2025-01-02");
         let points: Vec<Point> = (0..60)
             .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.01))
             .collect();
-        let braille_rows = |rows: u32| {
-            render_text(&points, "USD", "CNY", 60, rows, false)
-                .lines()
-                .filter(|line| has_braille(line))
-                .count()
-        };
-        assert_eq!(braille_rows(24), 13); // about half the terminal
-        assert_eq!(braille_rows(80), 25); // capped at 25
-        assert_eq!(braille_rows(10), 9); // floor
+        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let lines: Vec<&str> = text.lines().collect();
+        // panel + 15 braille rows + tick marks + labels
+        assert_eq!(lines.len(), 22);
+        assert_eq!(
+            lines.iter().filter(|line| has_braille(line)).count(),
+            CHART_ROWS as usize
+        );
+        // the y labels trailing the braille rows fit the 80-column terminal
+        assert!(lines.iter().all(|line| line.chars().count() <= 80));
+    }
+    #[test]
+    fn small_terminals_get_a_compact_chart() {
+        let base = date("2025-01-02");
+        let points: Vec<Point> = (0..60)
+            .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.01))
+            .collect();
+        // 21 rows: panel (5) + 9 braille rows + the ymin label line; no x axis
+        let small = render_text(&points, "USD", "CNY", 80, 21, false);
+        let lines: Vec<&str> = small.lines().collect();
+        assert_eq!(lines.len(), 14);
+        assert!(has_braille(&small));
+        assert!(!lines[5..].iter().any(|line| line.contains('+')));
+        assert!(lines[0].contains("USD/CNY Trend"));
+        // 8 rows: even the compact chart cannot fit -> one-line sparkline
+        let tiny = render_text(&points, "USD", "CNY", 80, 8, false);
+        let lines: Vec<&str> = tiny.lines().collect();
+        assert_eq!(lines.len(), 6);
+        assert!(!has_braille(&tiny));
+        assert_eq!(lines[5].chars().count(), 40);
+        assert!(lines[5]
+            .chars()
+            .all(|c| ('\u{2581}'..='\u{2588}').contains(&c)));
+        // 23 rows is still too short (panel + 15 + 2 axis lines + 2 spare)
+        let tight = render_text(&points, "USD", "CNY", 80, 23, false);
+        assert_eq!(tight.lines().count(), 14);
+        assert!(has_braille(&tight));
+        // 24 rows keeps the full chart
+        let full = render_text(&points, "USD", "CNY", 80, 24, false);
+        assert_eq!(full.lines().count(), 22);
+        assert!(has_braille(&full));
+    }
+
+    #[test]
+    fn sparkline_tracks_the_series_shape() {
+        let base = date("2025-01-02");
+        let rising: Vec<Point> = (0..40)
+            .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.05))
+            .collect();
+        let s = sparkline(&rising, 20);
+        assert_eq!(s.chars().count(), 20);
+        assert!(s.chars().all(|c| ('\u{2581}'..='\u{2588}').contains(&c)));
+        assert!(s.chars().last().unwrap() > s.chars().next().unwrap());
+        let flat: Vec<Point> = (0..10)
+            .map(|i| (base + chrono::Duration::days(i), 7.3))
+            .collect();
+        let s = sparkline(&flat, 8);
+        assert!(s.chars().all(|c| c == s.chars().next().unwrap()));
     }
 
     #[test]
     fn color_dims_chrome_and_tints_change() {
         let down = vec![(date("2025-01-02"), 7.5), (date("2025-01-03"), 7.0)];
-        let text = render_text(&down, "USD", "CNY", 60, 24, true);
+        let text = render_text(&down, "USD", "CNY", 80, 24, true);
         assert!(text.contains("\u{1b}[90m")); // borders and axes are bright black
         assert!(text.contains("\u{1b}[31m🔴 -6.67%"));
         let up = vec![(date("2025-01-02"), 7.0), (date("2025-01-03"), 7.2)];
-        assert!(render_text(&up, "USD", "CNY", 60, 24, true).contains("\u{1b}[32m🟢 +2.86%"));
-        assert!(!render_text(&up, "USD", "CNY", 60, 24, false).contains('\u{1b}'));
+        assert!(render_text(&up, "USD", "CNY", 80, 24, true).contains("\u{1b}[32m🟢 +2.86%"));
+        assert!(!render_text(&up, "USD", "CNY", 80, 24, false).contains('\u{1b}'));
     }
 
     #[test]

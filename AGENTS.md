@@ -10,7 +10,7 @@ Verify behavior against the source and tests when changing this document.
 
 ## Tech stack
 
-- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, `chrono`, `rusqlite` (bundled), `csv`, `zip`, `textplots`, and `libc`
+- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, `chrono`, `rusqlite` (bundled), `csv`, `zip`, `textplots`, and `terminal_size`
 - Source: `src/`; manifest: `Cargo.toml`
 - Build: `cargo build --release --locked`
 - Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
@@ -119,11 +119,20 @@ fxrate chart [options] SOURCE TARGET
   The panel is a Unicode box titled `SOURCE/TARGET Trend` with Current (with its date),
   High/Low (each with the extreme's date), signed Change (🟢 green up / 🔴 red down, neutral `±0.00%`),
   Average, and Volatility `(high − low) / average`; two stat columns when the box fits the
-  terminal width, one stat per line otherwise. The chart takes half the terminal height
-  capped at 25 rows (floor 9; bounded by the rows left under the panel), snapped to a `4k+1` row count so its dot height stays a
-  multiple of 16 for `TickDisplay::Sparse`; it is sized to the terminal width
-  (TIOCGWINSZ, 80×24 fallback). The x axis labels show the start/end dates,
-  the y axis labels show rate values
+  terminal width, one stat per line otherwise. The chart has a default canvas of 80
+  columns × 15 braille rows (the whole output is 22 lines: panel + chart + two
+  axis-label lines); 9 columns on the right are reserved for the y-axis labels that
+  trail the braille rows, so they never wrap on a terminal exactly as wide as the
+  canvas. The full chart needs the terminal to fit all 22 lines plus 2 spare rows
+  (24 rows with the standard panel); on terminals too short for that the chart is
+  replaced by a compact chart without axis labels (up to 9 braille rows, only the
+  high/low values labeled), or by a one-line sparkline (block characters, bucketed
+  and averaged; at most 40 characters) when even that cannot fit. The terminal size
+  is read via the `terminal_size` crate (80×24 fallback). The x axis shows `+` tick marks
+  with date labels at the start/end dates plus aligned intermediate dates (month starts
+  for ranges of two months or more, Mondays from two weeks to two months, every third
+  day for shorter ranges, thinned so labels never overlap); the y axis shows dense tick
+  labels at round values (1/2/5 × 10^k steps) snapped to cover the data range
 - Colors (bright-black borders/axes/labels, green/red change) only when stdout is a TTY
   and `NO_COLOR` is unset; `--output` files and piped output never contain escape sequences
 
@@ -198,9 +207,11 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
 - Fresh XDG dirs simulate a first run: config auto-creation, no-cache failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache refresh, provider-change refresh, explicit-first ordering/dedup, offline fallback math, force-update failure, interval handling, invalid config, usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing (N/A, old currency columns, trailing commas), EUR cross rates, single-day charts, and empty ranges
 - Chart text UI: stats box lines are rectangular by display width (2-cell emoji counted),
-  collapsing to one stat per line on narrow terminals; chart height follows the terminal
-  (24 rows → 13 braille rows, capped 25, floor 9); piped stdout and `--output` files contain
-  no escape sequences
+  collapsing to one stat per line on narrow terminals; the chart canvas defaults to
+  80×15 braille rows (22 output lines total, plus 2 spare rows of fit margin; 9
+  columns reserved for trailing y labels), becomes a label-free compact chart on
+  shorter terminals, and a one-line sparkline below that; piped stdout and `--output`
+  files contain no escape sequences
 
 ## CI
 
