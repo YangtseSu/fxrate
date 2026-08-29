@@ -1,4 +1,4 @@
-# huobi
+# fxrate
 
 Offline currency conversion CLI with local rate caching, so conversions
 continue to work without network access once rates are available. Also
@@ -13,7 +13,7 @@ offline after the first sync.
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
 - Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day
-- Historical charts (`huobi chart`) from ECB reference rates: a terminal
+- Historical charts (`fxrate chart`) from ECB reference rates: a terminal
   text chart (textplots), plus CSV/JSON output
 - XDG-compliant config, cache, and history locations
 
@@ -25,7 +25,7 @@ Requires Rust and Cargo.
 cargo build --release --locked
 ```
 
-The binary is `target/release/huobi`. Arch Linux users can build and install
+The binary is `target/release/fxrate`. Arch Linux users can build and install
 from `packaging/arch/`:
 
 ```sh
@@ -36,8 +36,8 @@ makepkg -si
 ## Usage
 
 ```
-huobi [options] AMOUNT SOURCE [TARGET...]
-huobi chart [options] SOURCE TARGET
+fxrate [options] AMOUNT SOURCE [TARGET...]
+fxrate chart [options] SOURCE TARGET
 ```
 
 ### convert
@@ -96,17 +96,17 @@ Options:
 Examples:
 
 ```sh
-huobi 100 USD              # multi-currency view over the configured list
-huobi 100 USD EUR CNY      # EUR and CNY first; with multi_view on, the
+fxrate 100 USD             # multi-currency view over the configured list
+fxrate 100 USD EUR CNY     # EUR and CNY first; with multi_view on, the
                            # default list follows after a blank line + rule
-huobi -u 100 USD           # force-refresh rates, then convert
-huobi -p exchange-api 100 USD EUR   # fetch from exchange-api instead
-huobi --date 2025-01-02 100 USD CNY   # convert at a historical ECB rate
+fxrate -u 100 USD          # force-refresh rates, then convert
+fxrate -p exchange-api 100 USD EUR   # fetch from exchange-api instead
+fxrate --date 2025-01-02 100 USD CNY   # convert at a historical ECB rate
 
-huobi chart USD CNY --from 2025-01-01 --to 2025-03-31
+fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31
                            # terminal text chart
-huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
-huobi chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
+fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
+fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 ```
 
 The first chart run downloads the ECB full history (about 0.6 MB); afterwards
@@ -123,8 +123,8 @@ and `2` usage error.
 
 ## Configuration
 
-Config file: `$XDG_CONFIG_HOME/huobi/config.json` (default
-`~/.config/huobi/config.json`), auto-created with defaults on first run.
+Config file: `$XDG_CONFIG_HOME/fxrate/config.json` (default
+`~/.config/fxrate/config.json`), auto-created with defaults on first run.
 
 ```json
 {
@@ -143,12 +143,28 @@ Config file: `$XDG_CONFIG_HOME/huobi/config.json` (default
   With no targets, the multi-currency view is always shown
 - `currencies`: default multi-currency view list
 
-Rates cache: `$XDG_DATA_HOME/huobi/rates.json` (default
-`~/.local/share/huobi/rates.json`), written atomically.
+Rates cache: `$XDG_DATA_HOME/fxrate/rates.json` (default
+`~/.local/share/fxrate/rates.json`), written atomically.
 
-Chart history: `$XDG_DATA_HOME/huobi/history.db` (default
-`~/.local/share/huobi/history.db`), a SQLite database with the ECB
+Chart history: `$XDG_DATA_HOME/fxrate/history.db` (default
+`~/.local/share/fxrate/history.db`), a SQLite database with the ECB
 reference-rate history, written transactionally.
+
+### Migrating from `huobi`
+
+Earlier releases were named `huobi` and stored their state under a `huobi`
+directory. `fxrate` does not migrate that data — move it yourself, or let
+`fxrate` start fresh:
+
+```sh
+mv ~/.config/huobi ~/.config/fxrate           # config.json
+mv ~/.local/share/huobi ~/.local/share/fxrate # rates.json, history.db
+```
+
+Substitute your own `XDG_CONFIG_HOME` / `XDG_DATA_HOME` if you override them.
+Skipping the move is safe: `fxrate` writes a default config and re-downloads the
+rates snapshot and the ECB history on first use. Afterwards you can remove the
+old `huobi` binary or package.
 
 ## Rate providers
 
@@ -164,7 +180,7 @@ Available currencies depend on the selected provider and may change.
 
 ## Historical rates
 
-- Both `huobi chart` and `huobi --date` use the ECB reference rates
+- Both `fxrate chart` and `fxrate --date` use the ECB reference rates
 ([eurofxref-hist.zip](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip),
 updated once per working day around 16:00 CET, for information only).
 The full history is synced into `history.db` on first use and refreshed

@@ -15,6 +15,9 @@ use crate::current::RateSnapshot;
 
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Directory name under the XDG base directories.
+pub const APP_DIR: &str = "fxrate";
+
 fn default_provider() -> String {
     "frankfurter".to_owned()
 }
@@ -76,19 +79,19 @@ fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
 
 pub fn config_path() -> PathBuf {
     xdg_dir("XDG_CONFIG_HOME", ".config")
-        .join("huobi")
+        .join(APP_DIR)
         .join("config.json")
 }
 
 pub fn data_path() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share")
-        .join("huobi")
+        .join(APP_DIR)
         .join("rates.json")
 }
 
 pub fn history_db_path() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share")
-        .join("huobi")
+        .join(APP_DIR)
         .join("history.db")
 }
 

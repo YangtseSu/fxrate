@@ -9,14 +9,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn temp_home(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("huobi-it-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("fxrate-it-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("huobi")).unwrap();
+    std::fs::create_dir_all(dir.join("fxrate")).unwrap();
     dir
 }
 
 fn run(home: &PathBuf, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_huobi"))
+    Command::new(env!("CARGO_BIN_EXE_fxrate"))
         .args(args)
         .env("XDG_DATA_HOME", home)
         .env("XDG_CONFIG_HOME", home)
@@ -25,7 +25,7 @@ fn run(home: &PathBuf, args: &[&str]) -> Output {
         .env("ALL_PROXY", "http://127.0.0.1:9")
         .env("TERM", "dumb")
         .output()
-        .expect("huobi binary should run")
+        .expect("fxrate binary should run")
 }
 
 fn seed_rates(home: &Path) {
@@ -36,7 +36,7 @@ fn seed_rates(home: &Path) {
         "provider": "frankfurter",
         "rates": {"USD": 1.1, "EUR": 1.0, "CNY": 7.8}
     });
-    std::fs::write(home.join("huobi").join("rates.json"), rates.to_string()).unwrap();
+    std::fs::write(home.join("fxrate").join("rates.json"), rates.to_string()).unwrap();
 }
 
 const SCHEMA: &str = "CREATE TABLE historical_rates (
@@ -59,7 +59,7 @@ CREATE TABLE history_coverage (
 
 /// Seed a covered 2025-01-02..2025-01-06 window for USD/CNY.
 fn seed_history(home: &Path, provider: &str) {
-    let conn = rusqlite::Connection::open(home.join("huobi").join("history.db")).unwrap();
+    let conn = rusqlite::Connection::open(home.join("fxrate").join("history.db")).unwrap();
     conn.execute_batch(SCHEMA).unwrap();
     let rows = [
         ("2025-01-02", 1.0322, 7.5338),

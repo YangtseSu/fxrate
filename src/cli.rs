@@ -251,8 +251,8 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
 
 fn usage() {
     eprintln!(
-        "Usage: huobi [options] AMOUNT SOURCE [TARGET...]
-       huobi chart [options] SOURCE TARGET
+        "Usage: fxrate [options] AMOUNT SOURCE [TARGET...]
+       fxrate chart [options] SOURCE TARGET
 
 Offline currency converter. With no targets, shows the multi-currency view;
 explicit targets are listed first, followed by the default multi-currency list.
@@ -267,7 +267,7 @@ Options:
 
 fn chart_usage() {
     eprintln!(
-        "Usage: huobi chart [options] SOURCE TARGET
+        "Usage: fxrate chart [options] SOURCE TARGET
 
 Historical exchange-rate chart from ECB reference rates (1 SOURCE = x TARGET).
 

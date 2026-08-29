@@ -1,4 +1,4 @@
-# Project: huobi — Offline Currency Converter CLI
+# Project: fxrate — Offline Currency Converter CLI
 
 A Rust offline currency conversion command-line tool with historical exchange-rate charts.
 
@@ -14,7 +14,7 @@ Verify behavior against the source and tests when changing this document.
 - Source: `src/`; manifest: `Cargo.toml`
 - Build: `cargo build --release --locked`
 - Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
-- Cargo build artifact: `target/release/huobi`; Cargo's `target/` directory is gitignored
+- Cargo build artifact: `target/release/fxrate`; Cargo's `target/` directory is gitignored
 - `rusqlite` is bundled and compiles SQLite's C sources, so a C compiler is required for the build
 
 ## Data source
@@ -35,7 +35,7 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 ### Historical rates (chart command)
 
 - Source: ECB reference rates, full history CSV: `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip` (contains `eurofxref-hist.csv`; dates from 1999, values EUR-based, `N/A` for missing entries; old currency columns such as EEK/LTL are dynamic)
-- The `huobi chart` command plots from the ECB history, and `huobi` (convert) reads the same ECB history when given `--date`.
+- The `fxrate chart` command plots from the ECB history, and `fxrate` (convert) reads the same ECB history when given `--date`.
   History is stored per provider in SQLite (`history.db`) and is never mixed with the `rates.json` snapshot
 - On first chart use (or when the requested `--from`/`--to` range is not covered, or with `-u/--update`) the full CSV is downloaded and upserted in a transaction (sync/fallback/error policy is under **Behavior**)
 - `history_coverage` records successfully synced ranges so weekend-only ranges are not mistaken for missing downloads; no weekend/holiday data is fabricated and no interpolation is done
@@ -49,14 +49,16 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 
 | Item    | Path |
 |---------|------|
-| Config  | `$XDG_CONFIG_HOME/huobi/config.json`, then `$HOME/.config/huobi/config.json`, otherwise `./huobi/config.json` |
-| Cache   | `$XDG_DATA_HOME/huobi/rates.json`, then `$HOME/.local/share/huobi/rates.json`, otherwise `./huobi/rates.json` |
-| History | `$XDG_DATA_HOME/huobi/history.db`, then `$HOME/.local/share/huobi/history.db`, otherwise `./huobi/history.db` (SQLite: `historical_rates`, `history_coverage`) |
+| Config  | `$XDG_CONFIG_HOME/fxrate/config.json`, then `$HOME/.config/fxrate/config.json`, otherwise `./fxrate/config.json` |
+| Cache   | `$XDG_DATA_HOME/fxrate/rates.json`, then `$HOME/.local/share/fxrate/rates.json`, otherwise `./fxrate/rates.json` |
+| History | `$XDG_DATA_HOME/fxrate/history.db`, then `$HOME/.local/share/fxrate/history.db`, otherwise `./fxrate/history.db` (SQLite: `historical_rates`, `history_coverage`) |
 
 - Config is auto-created with defaults on first run if missing
 - Cache is written atomically (temp file + rename) to avoid corruption
 - History is written through SQLite transactions (upsert, never delete+reinsert)
 - Override both with the XDG env vars for isolated tests
+- The project was renamed from `huobi` to `fxrate` (crate, binary, usage text, and the XDG directory name, which is the single `storage::APP_DIR` constant).
+  There is deliberately no migration code: the README tells users to move the old `huobi` config/data directories by hand, and a fresh install simply re-downloads
 
 ### Config schema
 
@@ -83,8 +85,8 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 ## CLI
 
 ```text
-huobi [options] AMOUNT SOURCE [TARGET...]
-huobi chart [options] SOURCE TARGET
+fxrate [options] AMOUNT SOURCE [TARGET...]
+fxrate chart [options] SOURCE TARGET
 ```
 
 - No targets → **multi-currency view** over the config `currencies` list, always shown regardless of `multi_view`
@@ -104,7 +106,7 @@ huobi chart [options] SOURCE TARGET
 
 ### Chart command
 
-`huobi chart SOURCE TARGET` plots `1 SOURCE = x TARGET` over a date range using ECB historical reference rates (charts are always EUR-based cross rates; the convert command and its providers are unaffected).
+`fxrate chart SOURCE TARGET` plots `1 SOURCE = x TARGET` over a date range using ECB historical reference rates (charts are always EUR-based cross rates; the convert command and its providers are unaffected).
 
 - `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds (default: earliest/latest available data).
   Invalid dates or `from > to` are usage errors (exit 2)
@@ -154,18 +156,22 @@ GitHub access: when `gh` is available, prefer it for everything GitHub — `gh` 
 `gh release view/upload/create` are also used to inspect or repair a release.
 Note: `gh` reads `$XDG_CONFIG_HOME` — do not run it with a test home's XDG vars exported in the same shell.
 
-3. Download the tag archive and compute the checksum: `curl -fsSLo /tmp/huobi.tar.gz https://github.com/YangtseSu/huobi/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/huobi.tar.gz` — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD downloads from GitHub)
+3. Download the tag archive and compute the checksum: `curl -fsSLo /tmp/fxrate.tar.gz https://github.com/YangtseSu/fxrate/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/fxrate.tar.gz` — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD downloads from GitHub)
 4. Update `packaging/arch/PKGBUILD`:
 
 - `pkgver=X.Y.Z`, `pkgrel=1` (resets to 1 on every new version)
 - `sha256sums=('<new hash>')` — single entry, replaced in full
 - Leave everything else (pkgname, arch, source URL pattern, build/check/ package functions) untouched
 
-5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum check), then a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/huobi` and the LICENSE
+5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum check), then a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
 6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
 
 The PKGBUILD lives at `packaging/arch/` on main, never in the tagged tree.
 Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
+
+Repository rename (done): `gh repo rename fxrate` moved `YangtseSu/huobi` to `YangtseSu/fxrate`; `origin` points at the new SSH URL and GitHub redirects the old name.
+Because GitHub names the archive's top directory after the repository, the `v0.4.1` tarball is now `fxrate-0.4.1/` and its hash differs from the pre-rename one — `sha256sums` in the PKGBUILD was re-recorded for it.
+Release assets published before the rename are still called `huobi-<os>-<arch>`; re-pushing a `v*` tag regenerates them as `fxrate-<os>-<arch>` (`release.yml` uploads with `--clobber`).
 
 ## Testing notes
 

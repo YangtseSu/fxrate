@@ -18,22 +18,22 @@ jobs:
             arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary: huobi
+            binary: fxrate
           - os: linux
             arch: arm64
             runner: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            binary: huobi
+            binary: fxrate
           - os: darwin
             arch: arm64
             runner: macos-14
             target: aarch64-apple-darwin
-            binary: huobi
+            binary: fxrate
           - os: windows
             arch: amd64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: huobi.exe
+            binary: fxrate.exe
     steps:
       - uses: actions/checkout@v7
 
@@ -59,14 +59,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/fxrate-${{ matrix.os }}-${{ matrix.arch }}"
 
       - name: Stage Windows binary
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/huobi-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/fxrate-${{ matrix.os }}-${{ matrix.arch }}.exe"
 
       - uses: actions/upload-artifact@v7
         with:

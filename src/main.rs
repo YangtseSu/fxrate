@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Yangtse Su
 //
-// Command huobi is an offline currency conversion CLI with historical
+// Command fxrate is an offline currency conversion CLI with historical
 // exchange-rate charts.
 
 mod cli;
@@ -27,18 +27,18 @@ use provider::Provider;
 use render::Format;
 
 #[derive(Debug)]
-struct HuobiError(String);
+struct FxrateError(String);
 
-impl fmt::Display for HuobiError {
+impl fmt::Display for FxrateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl Error for HuobiError {}
+impl Error for FxrateError {}
 
 fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
-    Box::new(HuobiError(message.into()))
+    Box::new(FxrateError(message.into()))
 }
 
 fn fatal(message: &str) -> ! {

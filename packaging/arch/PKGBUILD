@@ -1,16 +1,16 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 
-pkgname=huobi
+pkgname=fxrate
 pkgver=0.4.1
 pkgrel=1
 pkgdesc="Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 arch=('x86_64' 'aarch64')
-url="https://github.com/YangtseSu/huobi"
+url="https://github.com/YangtseSu/fxrate"
 license=('GPL-3.0-only')
 depends=()
 makedepends=('rust')
 source=("$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('d87f44def2b892e645918bc6d626db32565da51464cacfe2b085bcbee0b8322a')
+sha256sums=('f92a3903ec7ca1e9edc091488f065de541e38ef1f6e578040ee6a8d68749060b')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
@@ -31,6 +31,6 @@ check() {
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"
-  install -Dm755 target/release/huobi "$pkgdir/usr/bin/huobi"
+  install -Dm755 target/release/fxrate "$pkgdir/usr/bin/fxrate"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -1,10 +1,10 @@
 [package]
-name = "huobi"
+name = "fxrate"
 version = "0.4.1"
 edition = "2021"
 description = "Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 license = "GPL-3.0-only"
-repository = "https://github.com/YangtseSu/huobi"
+repository = "https://github.com/YangtseSu/fxrate"
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
