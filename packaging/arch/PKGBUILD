@@ -1,7 +1,7 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 
 pkgname=fxrate
-pkgver=0.4.1
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
 arch=('x86_64' 'aarch64')
@@ -10,7 +10,7 @@ license=('GPL-3.0-only')
 depends=()
 makedepends=('rust')
 source=("$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('f92a3903ec7ca1e9edc091488f065de541e38ef1f6e578040ee6a8d68749060b')
+sha256sums=('d6415e0f796f24f4c201ba470c66117a8d96c5785a70eea0775a32a343770071')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
