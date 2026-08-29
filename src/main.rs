@@ -12,6 +12,7 @@ mod provider;
 mod render;
 mod series;
 mod storage;
+mod style;
 
 use chrono::{NaiveDate, Utc};
 use std::collections::HashMap;
@@ -21,6 +22,8 @@ use std::fmt;
 use std::fs;
 use std::io::{self, IsTerminal};
 use std::process;
+
+use owo_colors::OwoColorize;
 
 use cli::{ChartArgs, Command, ConvertArgs};
 use provider::Provider;
@@ -45,7 +48,7 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
 /// snapshot date for the chart's live tail: a weekend plus one holiday.
 const LIVE_TAIL_MAX_GAP_DAYS: i64 = 4;
 fn fatal(message: &str) -> ! {
-    eprintln!("error: {message}");
+    eprintln!("{}", style::error(message));
     process::exit(1);
 }
 
@@ -80,8 +83,11 @@ fn run_convert(args: ConvertArgs) {
             Some(provider) => provider,
             None => {
                 eprintln!(
-                    "warning: invalid provider {:?} in config, falling back to frankfurter",
-                    config.provider()
+                    "{}",
+                    style::warning(format!(
+                        "invalid provider {:?} in config, falling back to frankfurter",
+                        config.provider()
+                    ))
                 );
                 Provider::Frankfurter
             }
@@ -94,8 +100,11 @@ fn run_convert(args: ConvertArgs) {
             Some(duration) => duration,
             None => {
                 eprintln!(
-                    "warning: invalid update_interval={:?} in config, falling back to 24h",
-                    config.update_interval()
+                    "{}",
+                    style::warning(format!(
+                        "invalid update_interval={:?} in config, falling back to 24h",
+                        config.update_interval()
+                    ))
                 );
                 storage::DEFAULT_INTERVAL
             }
@@ -106,7 +115,10 @@ fn run_convert(args: ConvertArgs) {
         Ok(snapshot) => Some(snapshot),
         Err(error) => {
             if error.downcast_ref::<io::Error>().is_none() {
-                eprintln!("warning: failed to read local rates: {error}");
+                eprintln!(
+                    "{}",
+                    style::warning(format!("failed to read local rates: {error}"))
+                );
             }
             None
         }
@@ -117,7 +129,10 @@ fn run_convert(args: ConvertArgs) {
         match current::fetch_rates(provider) {
             Ok(fresh) => {
                 if let Err(error) = storage::save_rates(&fresh) {
-                    eprintln!("warning: failed to save rates cache: {error}");
+                    eprintln!(
+                        "{}",
+                        style::warning(format!("failed to save rates cache: {error}"))
+                    );
                 }
                 snapshot = Some(fresh);
                 updated = true;
@@ -134,20 +149,27 @@ fn run_convert(args: ConvertArgs) {
                     cached.provider.as_str()
                 };
                 eprintln!(
-                    "warning: failed to update rates: {error}; using cached rates (date {}, provider {cached_provider})",
-                    cached.date
+                    "{}",
+                    style::warning(format!(
+                        "failed to update rates: {error}; using cached rates (date {}, provider {cached_provider})",
+                        cached.date
+                    ))
                 );
             }
         }
     }
     let snapshot = snapshot.expect("fatal exits when no snapshot is available");
-    render_convert(&snapshot, amount, &source, &explicit, &config, updated);
+    render_convert(
+        &snapshot,
+        amount,
+        &source,
+        &explicit,
+        &config,
+        updated,
+        style::stdout_color(),
+    );
 }
 
-/// Render the conversion table and footer for a resolved rate snapshot.
-///
-/// Shared by the live-rates path and the historical (`--date`) path; the
-/// only differences are the snapshot origin and the `updated` flag.
 /// Render the conversion table and footer for a resolved rate snapshot.
 ///
 /// Shared by the live-rates path and the historical (`--date`) path; the
@@ -161,17 +183,36 @@ fn render_convert(
     targets: &[String],
     config: &storage::Config,
     updated: bool,
+    color: bool,
 ) {
     if let Err(error) = current::currency_rate(snapshot, source) {
         fatal(&error.to_string());
     }
+    for line in convert_lines(snapshot, amount, source, targets, config, updated, color) {
+        println!("{line}");
+    }
+}
+
+/// Build the conversion table lines with the footer last: converted amounts
+/// bold and the footer bright black when `color`, plain otherwise. Warnings
+/// for skipped currencies go to stderr inline; otherwise pure, so the
+/// styling is unit-testable.
+fn convert_lines(
+    snapshot: &current::RateSnapshot,
+    amount: f64,
+    source: &str,
+    targets: &[String],
+    config: &storage::Config,
+    updated: bool,
+    color: bool,
+) -> Vec<String> {
     let convert_list = |list: Vec<String>| {
         list.into_iter()
             .filter_map(
                 |code| match current::convert(snapshot, source, &code, amount) {
                     Ok(value) => Some(Row { code, value }),
                     Err(error) => {
-                        eprintln!("warning: {error}, skipped");
+                        eprintln!("{}", style::warning(format!("{error}, skipped")));
                         None
                     }
                 },
@@ -191,6 +232,7 @@ fn render_convert(
 
     // Width of the right-aligned value column (symbol + number) so decimal
     // points line up across rows that may carry different-length symbols.
+    // Computed on raw strings: escape sequences must not shift the column.
     let value_width = explicit_rows
         .iter()
         .chain(multi_rows.iter())
@@ -206,12 +248,23 @@ fn render_convert(
     let padding = amount_string.len() + source.len() + 4;
     let indent = " ".repeat(padding);
 
-    let render_row = |first: bool, row: &Row| -> String {
+    let render_row = |first: bool, row: &Row, color: bool| -> String {
         let m = currency::meta(&row.code);
         let value = format!("{}{:.2}", m.symbol, row.value);
         let value = format!("{value:>width$}", width = value_width);
+        // Paint after padding so escape bytes stay out of the width math.
+        let value = if color {
+            value.bold().to_string()
+        } else {
+            value
+        };
+        let amount_cell = if color {
+            amount_string.bold().to_string()
+        } else {
+            amount_string.clone()
+        };
         let mut line = if first {
-            format!("{amount_string} {source} = {value} {}", row.code)
+            format!("{amount_cell} {source} = {value} {}", row.code)
         } else {
             format!("{indent}{value} {}", row.code)
         };
@@ -229,28 +282,36 @@ fn render_convert(
     let mut lines: Vec<String> = explicit_rows
         .iter()
         .enumerate()
-        .map(|(i, row)| render_row(i == 0, row))
+        .map(|(i, row)| render_row(i == 0, row, color))
         .collect();
     if !multi_rows.is_empty() {
         if !explicit_rows.is_empty() {
-            let sep_len = lines.first().map(|l| l.len()).unwrap_or(padding);
+            // Width from the raw first row: painted rows carry escape bytes
+            // that would inflate the rule length.
+            let sep_len = explicit_rows
+                .first()
+                .map(|row| render_row(true, row, false).len())
+                .unwrap_or(padding);
             lines.push("-".repeat(sep_len));
         }
         lines.extend(
             multi_rows
                 .iter()
                 .enumerate()
-                .map(|(i, row)| render_row(i == 0 && explicit_rows.is_empty(), row)),
+                .map(|(i, row)| render_row(i == 0 && explicit_rows.is_empty(), row, color)),
         );
     }
-    for line in &lines {
-        println!("{line}");
-    }
-    if updated {
-        println!("rates updated: {}", snapshot.date);
+    let footer = if updated {
+        format!("rates updated: {}", snapshot.date)
     } else {
-        println!("rates date {}", snapshot.date);
-    }
+        format!("rates date {}", snapshot.date)
+    };
+    lines.push(if color {
+        footer.bright_black().to_string()
+    } else {
+        footer
+    });
+    lines
 }
 
 /// Historical conversion: resolve EUR-based rates for `date` from the ECB
@@ -273,7 +334,12 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
                 "no historical rates available for {date} and update failed: {error}"
             )),
             Err(error) => {
-                eprintln!("warning: failed to update historical rates: {error}; using cached data");
+                eprintln!(
+                    "{}",
+                    style::warning(format!(
+                        "failed to update historical rates: {error}; using cached data"
+                    ))
+                );
             }
         }
     }
@@ -285,7 +351,10 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
         Err(error) => fatal(&format!("failed to read history coverage: {error}")),
     };
     if effective_date != date {
-        eprintln!("warning: no ECB rate for {date}; using {effective_date}");
+        eprintln!(
+            "{}",
+            style::warning(format!("no ECB rate for {date}; using {effective_date}"))
+        );
     }
     let config = storage::load_config();
     let explicit = dedupe_targets(&args.targets, &args.source, &[]);
@@ -323,6 +392,7 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
         &args.targets,
         &config,
         false,
+        style::stdout_color(),
     );
 }
 
@@ -348,7 +418,10 @@ fn run_chart(args: ChartArgs) {
         Ok(snapshot) => Some(snapshot),
         Err(error) => {
             if error.downcast_ref::<io::Error>().is_none() {
-                eprintln!("warning: failed to read local rates: {error}");
+                eprintln!(
+                    "{}",
+                    style::warning(format!("failed to read local rates: {error}"))
+                );
             }
             None
         }
@@ -380,7 +453,12 @@ fn run_chart(args: ChartArgs) {
                 "no historical rates available and update failed: {error}"
             )),
             Err(error) => {
-                eprintln!("warning: failed to update historical rates: {error}; using cached data");
+                eprintln!(
+                    "{}",
+                    style::warning(format!(
+                        "failed to update historical rates: {error}; using cached data"
+                    ))
+                );
             }
         }
     }
@@ -423,7 +501,10 @@ fn run_chart(args: ChartArgs) {
                         Some((live_date, target_rate / source_rate))
                     }
                     (Err(error), _) | (_, Err(error)) => {
-                        eprintln!("warning: {error}; chart ends at {}", coverage.end);
+                        eprintln!(
+                            "{}",
+                            style::warning(format!("{error}; chart ends at {}", coverage.end))
+                        );
                         None
                     }
                 }
@@ -497,11 +578,7 @@ fn run_chart(args: ChartArgs) {
                 let (cols, rows) = render::terminal_size();
                 // Colors only on an interactive terminal; files and pipes
                 // stay plain, and NO_COLOR turns them off.
-                let color = tty
-                    && output.is_none()
-                    && std::env::var_os("NO_COLOR")
-                        .filter(|v| !v.is_empty())
-                        .is_none();
+                let color = output.is_none() && style::stdout_color();
                 render::render_text(&points, &source, &target, cols as usize, rows as u32, color)
             };
             match output {
@@ -549,5 +626,57 @@ mod tests {
         ];
         let excluded = vec!["gbp".to_owned()];
         assert_eq!(dedupe_targets(&currencies, "USD", &excluded), vec!["EUR"]);
+    }
+
+    fn snapshot() -> current::RateSnapshot {
+        current::RateSnapshot {
+            base: "EUR".to_owned(),
+            date: "2026-08-28".to_owned(),
+            fetched_at: Utc::now(),
+            provider: "frankfurter".to_owned(),
+            rates: HashMap::from([
+                ("EUR".to_owned(), 1.0),
+                ("USD".to_owned(), 1.1),
+                ("CNY".to_owned(), 7.8),
+            ]),
+        }
+    }
+
+    #[test]
+    fn convert_lines_are_plain_without_color() {
+        let config = storage::Config::default();
+        let lines = convert_lines(
+            &snapshot(),
+            100.0,
+            "USD",
+            &["CNY".to_owned()],
+            &config,
+            false,
+            false,
+        );
+        assert!(!lines.iter().any(|line| line.contains('\u{1b}')));
+        assert_eq!(lines.last().unwrap(), "rates date 2026-08-28");
+        // 100 USD = 100 * rate[CNY] / rate[USD] = 100 * 7.8 / 1.1
+        assert!(lines[0].contains("709.09"));
+    }
+
+    #[test]
+    fn convert_lines_bold_amounts_and_dim_footer_with_color() {
+        let config = storage::Config::default();
+        let lines = convert_lines(
+            &snapshot(),
+            100.0,
+            "USD",
+            &["CNY".to_owned()],
+            &config,
+            true,
+            true,
+        );
+        assert!(lines[0].contains("\u{1b}[1m")); // bold amounts
+        assert!(lines[0].contains("709.09"));
+        assert!(lines
+            .last()
+            .unwrap()
+            .contains("\u{1b}[90mrates updated: 2026-08-28"));
     }
 }

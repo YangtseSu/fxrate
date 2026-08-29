@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::current::RateSnapshot;
+use crate::style;
 
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -116,19 +117,28 @@ pub fn load_config() -> Config {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
             Ok(config) => config,
             Err(error) => {
-                eprintln!("warning: malformed config: {error}, using defaults");
+                eprintln!(
+                    "{}",
+                    style::warning(format!("malformed config: {error}, using defaults"))
+                );
                 Config::default()
             }
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let config = Config::default();
             if let Err(error) = save_json(&path, &config, false) {
-                eprintln!("warning: failed to write default config: {error}");
+                eprintln!(
+                    "{}",
+                    style::warning(format!("failed to write default config: {error}"))
+                );
             }
             config
         }
         Err(error) => {
-            eprintln!("warning: failed to read config: {error}, using defaults");
+            eprintln!(
+                "{}",
+                style::warning(format!("failed to read config: {error}, using defaults"))
+            );
             Config::default()
         }
     }

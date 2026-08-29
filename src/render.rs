@@ -168,8 +168,11 @@ fn lttb(data: &[Point], threshold: usize) -> Vec<Point> {
 }
 
 /// ANSI foregrounds used when coloring is on: bright black for the chrome
-/// (borders, axes, tick labels), green/red for the change cell.
+/// (borders, axes, tick labels), bright cyan for the plotted line (a chart
+/// accent that leaves green/red free to mean the change direction), and
+/// green/red for the change cell.
 const DIM: &str = "\x1b[90m";
+const CYAN: &str = "\x1b[96m";
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
@@ -376,30 +379,44 @@ fn stats_panel(
     (out, rows)
 }
 
-/// Wrap every run of axis/label characters (anything that is not braille or
-/// whitespace) in bright black so the plotted line keeps the visual focus.
+/// Color the chart canvas by character class: runs of braille cells with at
+/// least one raised dot (the plotted line) go bright cyan; runs of anything
+/// else that is not blank canvas or whitespace (borders, axes, tick labels)
+/// go bright black; blank braille cells (U+2800 canvas padding), spaces, and
+/// newlines pass through uncolored.
 fn dim_axes(chart: &str) -> String {
+    let tint_of = |c: char| -> Option<&'static str> {
+        if ('\u{2801}'..='\u{28ff}').contains(&c) {
+            Some(CYAN)
+        } else if c == ' ' || c == '\n' || c == '\u{2800}' {
+            None
+        } else {
+            Some(DIM)
+        }
+    };
     let mut out = String::with_capacity(chart.len() + 64);
     let mut run = String::new();
-    for c in chart.chars() {
-        let keep = c == ' ' || c == '\n' || ('\u{2800}'..='\u{28ff}').contains(&c);
-        if keep {
-            if !run.is_empty() {
-                out.push_str(DIM);
-                out.push_str(&run);
+    let mut tint: Option<&'static str> = None;
+    let mut flush = |tint: &mut Option<&'static str>, run: &mut String| {
+        match tint.take() {
+            Some(t) => {
+                out.push_str(t);
+                out.push_str(run);
                 out.push_str(RESET);
-                run.clear();
             }
-            out.push(c);
-        } else {
-            run.push(c);
+            None => out.push_str(run),
         }
+        run.clear();
+    };
+    for c in chart.chars() {
+        let next = tint_of(c);
+        if next != tint {
+            flush(&mut tint, &mut run);
+            tint = next;
+        }
+        run.push(c);
     }
-    if !run.is_empty() {
-        out.push_str(DIM);
-        out.push_str(&run);
-        out.push_str(RESET);
-    }
+    flush(&mut tint, &mut run);
     out
 }
 /// Smallest "nice" step (1, 2, or 5 times a power of ten) that is at least
@@ -617,8 +634,8 @@ const Y_LABEL_W: usize = 9;
 /// shows tick marks with date labels at aligned dates (month starts, Mondays,
 /// or every few days depending on the range); the y axis shows the cross rate
 /// with dense ticks at round values. `color` emits the ANSI bright-black
-/// chrome and green/red change; callers writing to a file or a pipe must pass
-/// `false`.
+/// chrome, the bright-cyan plotted line, and the green/red change; callers
+/// writing to a file or a pipe must pass `false`.
 pub fn render_text(
     points: &[Point],
     source: &str,
@@ -689,7 +706,13 @@ pub fn render_text(
             let chart = if color { dim_axes(&chart) } else { chart };
             return format!("{panel}\n{chart}");
         }
-        return format!("{panel}\n{}", sparkline(points, chart_cols.min(40)));
+        let spark = sparkline(points, chart_cols.min(40));
+        let spark = if color {
+            format!("{CYAN}{spark}{RESET}")
+        } else {
+            spark
+        };
+        return format!("{panel}\n{spark}");
     }
 
     // Snap the padded range to a ladder of "nice" steps (1/2/5 × 10^k) so
@@ -949,7 +972,7 @@ mod tests {
         let down = vec![(date("2025-01-02"), 7.5), (date("2025-01-03"), 7.0)];
         let text = render_text(&down, "USD", "CNY", 80, 24, true);
         assert!(text.contains("\u{1b}[90m")); // borders and axes are bright black
-        assert!(text.contains("\u{1b}[31m🔴 -6.67%"));
+        assert!(text.contains("\u{1b}[96m")); // the plotted line is bright cyan
         let up = vec![(date("2025-01-02"), 7.0), (date("2025-01-03"), 7.2)];
         assert!(render_text(&up, "USD", "CNY", 80, 24, true).contains("\u{1b}[32m🟢 +2.86%"));
         assert!(!render_text(&up, "USD", "CNY", 80, 24, false).contains('\u{1b}'));

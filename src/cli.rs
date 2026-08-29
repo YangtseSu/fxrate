@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use crate::provider::Provider;
 use crate::render::Format;
+use crate::style;
 
 pub enum Command {
     Convert(ConvertArgs),
@@ -54,7 +55,10 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
             "-u" | "--update" => force = true,
             "-p" | "--provider" => {
                 let Some(name) = iter.next() else {
-                    eprintln!("error: option {arg} requires a provider name");
+                    eprintln!(
+                        "{}",
+                        style::error(format!("option {arg} requires a provider name"))
+                    );
                     usage();
                     return Err(2);
                 };
@@ -62,12 +66,15 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
             }
             "-d" | "--date" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a date");
+                    eprintln!("{}", style::error(format!("option {arg} requires a date")));
                     usage();
                     return Err(2);
                 };
                 date = Some(NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
-                    eprintln!("error: invalid date {value:?} (expected YYYY-MM-DD)");
+                    eprintln!(
+                        "{}",
+                        style::error(format!("invalid date {value:?} (expected YYYY-MM-DD)"))
+                    );
                     usage();
                     2
                 })?);
@@ -77,7 +84,7 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
                 return Err(0);
             }
             _ if arg.starts_with('-') => {
-                eprintln!("error: unknown option {arg}");
+                eprintln!("{}", style::error(format!("unknown option {arg}")));
                 usage();
                 return Err(2);
             }
@@ -94,7 +101,10 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
                 .map(|provider| provider.name())
                 .collect::<Vec<_>>()
                 .join(", ");
-            eprintln!("error: unknown provider {name:?} (valid: {valid})");
+            eprintln!(
+                "{}",
+                style::error(format!("unknown provider {name:?} (valid: {valid})"))
+            );
             usage();
             return Err(2);
         }
@@ -104,11 +114,14 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
         return Err(2);
     }
     let amount = positional[0].parse::<f64>().map_err(|_| {
-        eprintln!("error: invalid amount {:?}", positional[0]);
+        eprintln!(
+            "{}",
+            style::error(format!("invalid amount {:?}", positional[0]))
+        );
         2
     })?;
     if !amount.is_finite() {
-        eprintln!("error: amount must be finite");
+        eprintln!("{}", style::error("amount must be finite"));
         usage();
         return Err(2);
     }
@@ -129,7 +142,10 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
 
 fn parse_date(value: &str) -> Result<NaiveDate, i32> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
-        eprintln!("error: invalid date {value:?} (expected YYYY-MM-DD)");
+        eprintln!(
+            "{}",
+            style::error(format!("invalid date {value:?} (expected YYYY-MM-DD)"))
+        );
         chart_usage();
         2
     })
@@ -149,7 +165,10 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             "-u" | "--update" => force = true,
             "-p" | "--provider" => {
                 let Some(name) = iter.next() else {
-                    eprintln!("error: option {arg} requires a provider name");
+                    eprintln!(
+                        "{}",
+                        style::error(format!("option {arg} requires a provider name"))
+                    );
                     chart_usage();
                     return Err(2);
                 };
@@ -157,7 +176,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             }
             "--from" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a date");
+                    eprintln!("{}", style::error(format!("option {arg} requires a date")));
                     chart_usage();
                     return Err(2);
                 };
@@ -165,7 +184,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             }
             "--to" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a date");
+                    eprintln!("{}", style::error(format!("option {arg} requires a date")));
                     chart_usage();
                     return Err(2);
                 };
@@ -173,14 +192,22 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             }
             "--format" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a format");
+                    eprintln!(
+                        "{}",
+                        style::error(format!("option {arg} requires a format"))
+                    );
                     chart_usage();
                     return Err(2);
                 };
                 match Format::from_name(value) {
                     Some(parsed) => format = parsed,
                     None => {
-                        eprintln!("error: unknown format {value:?} (valid: csv, json, text, auto)");
+                        eprintln!(
+                            "{}",
+                            style::error(format!(
+                                "unknown format {value:?} (valid: csv, json, text, auto)"
+                            ))
+                        );
                         chart_usage();
                         return Err(2);
                     }
@@ -188,7 +215,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             }
             "--output" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("error: option {arg} requires a path");
+                    eprintln!("{}", style::error(format!("option {arg} requires a path")));
                     chart_usage();
                     return Err(2);
                 };
@@ -199,7 +226,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
                 return Err(0);
             }
             _ if arg.starts_with('-') => {
-                eprintln!("error: unknown option {arg}");
+                eprintln!("{}", style::error(format!("unknown option {arg}")));
                 chart_usage();
                 return Err(2);
             }
@@ -216,7 +243,12 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
                 .map(|provider| provider.name())
                 .collect::<Vec<_>>()
                 .join(", ");
-            eprintln!("error: unknown provider {name:?} for chart (valid: {valid})");
+            eprintln!(
+                "{}",
+                style::error(format!(
+                    "unknown provider {name:?} for chart (valid: {valid})"
+                ))
+            );
             chart_usage();
             return Err(2);
         }
@@ -226,13 +258,19 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
         return Err(2);
     }
     if positional.len() > 2 {
-        eprintln!("error: too many arguments for chart (expected SOURCE TARGET)");
+        eprintln!(
+            "{}",
+            style::error("too many arguments for chart (expected SOURCE TARGET)")
+        );
         chart_usage();
         return Err(2);
     }
     if let (Some(from), Some(to)) = (from, to) {
         if from > to {
-            eprintln!("error: --from {from} must not be after --to {to}");
+            eprintln!(
+                "{}",
+                style::error(format!("--from {from} must not be after --to {to}"))
+            );
             chart_usage();
             return Err(2);
         }

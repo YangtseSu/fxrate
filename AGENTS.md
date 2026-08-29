@@ -10,7 +10,7 @@ Verify behavior against the source and tests when changing this document.
 
 ## Tech stack
 
-- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, `chrono`, `rusqlite` (bundled), `csv`, `zip`, `textplots`, and `terminal_size`
+- Rust with Cargo and standard library plus `reqwest`, `serde`, `serde_json`, `chrono`, `rusqlite` (bundled), `csv`, `zip`, `textplots`, `terminal_size`, and `owo-colors`
 - Source: `src/`; manifest: `Cargo.toml`
 - Build: `cargo build --release --locked`
 - Test: `cargo test --locked` (unit tests in modules + `tests/chart.rs`)
@@ -140,8 +140,8 @@ fxrate chart [options] SOURCE TARGET
   for ranges of two months or more, Mondays from two weeks to two months, every third
   day for shorter ranges, thinned so labels never overlap); the y axis shows dense tick
   labels at round values (1/2/5 × 10^k steps) snapped to cover the data range
-- Colors (bright-black borders/axes/labels, green/red change) only when stdout is a TTY
-  and `NO_COLOR` is unset; `--output` files and piped output never contain escape sequences
+- Colors (bright-cyan plotted line, bright-black borders/axes/labels, green/red change) only when stdout is a TTY
+  and `NO_COLOR` is unset or empty; `--output` files and piped output never contain escape sequences
 
 ## Behavior
 
@@ -150,10 +150,12 @@ fxrate chart [options] SOURCE TARGET
   Exit 1 only when there is no cache at all and the fetch fails
 - Force-update failure always exits 1
 - stdout: the conversion table plus a footer line with the rate date — `rates date <date>`.
-  When rates were refreshed during the run, the footer is `rates updated: <date>` instead, so the update status and date appear only once, at the bottom
+  When rates were refreshed during the run, the footer is `rates updated: <date>` instead, so the update status and date appear only once, at the bottom.
+  On a TTY (stdout, `NO_COLOR` unset or empty) the amounts are bold and the footer is bright black; piped output stays plain
 - `--date` convert reuses the ECB history path and all of its sync/fallback/error rules documented under the CLI options above (the rendered rate date is the effective, possibly rolled-back day).
   It applies the same `amount * rate[dst] / rate[src]` EUR-based cross formula as `chart`.
-- stderr: notices and warnings (skipped currencies, invalid config, failed refresh fallback) and the history-sync progress spinner
+- stderr: notices and warnings (skipped currencies, invalid config, failed refresh fallback) and the history-sync progress spinner.
+  `warning:` labels are yellow and `error:` labels are red when stderr is a TTY and `NO_COLOR` is unset or empty — gated independently of stdout, and plain when either stream is redirected
 - Chart: on startup, sync the ECB full history when the requested range is not covered by `history_coverage`, when there is no coverage at all, or with `-u/--update`.
   A failed sync warns and falls back to cached data; exit 1 only when no local history exists.
   Covered ranges never touch the network; the coverage check runs only when both `--from` and `--to` are given — a single bound is not separately validated and is clamped to the stored coverage
@@ -220,6 +222,14 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
   columns reserved for trailing y labels), becomes a label-free compact chart on
   shorter terminals, and a one-line sparkline below that; piped stdout and `--output`
   files contain no escape sequences
+- Colors: `render_text(color=true)` pins exact SGR codes (bright-black `90` chrome,
+  bright-cyan `96` plotted line, green/red `32`/`31` change), `convert_lines` pins bold
+  `1` amounts and the bright-black footer, and `style::label` pins the yellow `33` /
+  red `31` warning/error labels; every colored builder also asserts the plain variant
+  carries no escape sequences. Stream gates (`style::stdout_color`/`stderr_color`) are
+  trivial (TTY + non-empty `NO_COLOR`) and are smoke-tested under a pty rather than
+  unit-tested; styling decisions stay explicit at call sites, never auto-detected
+  per emission, so redirected output is escape-free by construction
 
 ## CI
 
