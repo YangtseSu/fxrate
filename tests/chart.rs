@@ -151,6 +151,22 @@ fn convert_works_offline_from_seeded_cache() {
 }
 
 #[test]
+fn convert_accepts_negative_amounts() {
+    let home = temp_home("negative");
+    seed_rates(&home);
+    let out = run(&home, &["-100", "USD", "CNY"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The sign moves in front of the currency symbol.
+    assert!(stdout.contains("-$100.00 USD ="), "{stdout}");
+    assert!(stdout.contains("-¥709.09 CNY"), "{stdout}");
+}
+
+#[test]
 fn convert_warns_on_unreadable_cache() {
     let home = temp_home("cache-denied");
     // A directory where the cache file belongs: reading it fails for any

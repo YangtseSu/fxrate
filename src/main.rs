@@ -203,6 +203,18 @@ fn render_convert(
     Ok(())
 }
 
+/// Format a currency amount: a negative sign goes before the symbol
+/// (`-$100.00`), and values that round to `-0.00` are normalized to `0.00`.
+fn money(symbol: &str, value: f64) -> String {
+    let formatted = format!("{value:.2}");
+    let (sign, magnitude) = match formatted.strip_prefix('-') {
+        Some("0.00") => ("", "0.00".to_owned()),
+        Some(magnitude) => ("-", magnitude.to_owned()),
+        None => ("", formatted),
+    };
+    format!("{sign}{symbol}{magnitude}")
+}
+
 /// Build the conversion table lines with the footer last: converted amounts
 /// bold and the footer bright black when `color`, plain otherwise. Warnings
 /// for skipped currencies go to stderr inline; otherwise pure, so the
@@ -248,13 +260,13 @@ fn convert_lines(
         .chain(multi_rows.iter())
         .map(|row| {
             let m = currency::meta(&row.code);
-            render::display_width(&format!("{}{:.2}", m.symbol, row.value))
+            render::display_width(&money(&m.symbol, row.value))
         })
         .max()
         .unwrap_or(0);
 
     let source_meta = currency::meta(source);
-    let amount_string = format!("{}{:.2}", source_meta.symbol, amount);
+    let amount_string = money(&source_meta.symbol, amount);
     // Display columns of the first row's prefix `{amount} {source} = `:
     // the +4 is the one space after the amount plus the three of " = ".
     // Display width, not bytes: multi-byte symbols (€, ¥) are one column.
@@ -263,7 +275,7 @@ fn convert_lines(
 
     let render_row = |first: bool, row: &Row, color: bool| -> String {
         let m = currency::meta(&row.code);
-        let value = format!("{}{:.2}", m.symbol, row.value);
+        let value = money(&m.symbol, row.value);
         let value = format!("{value:>width$}", width = value_width);
         // Paint after padding so escape bytes stay out of the width math.
         let value = if color {
@@ -808,5 +820,14 @@ mod tests {
             .last()
             .unwrap()
             .contains("\u{1b}[90mrates updated: 2026-08-28"));
+    }
+
+    #[test]
+    fn money_puts_the_sign_before_the_symbol() {
+        assert_eq!(money("$", 100.0), "$100.00");
+        assert_eq!(money("$", -100.0), "-$100.00");
+        assert_eq!(money("¥", -0.0), "¥0.00");
+        assert_eq!(money("¥", -0.004), "¥0.00");
+        assert_eq!(money("¥", -0.005), "-¥0.01");
     }
 }

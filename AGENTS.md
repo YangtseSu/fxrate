@@ -114,7 +114,7 @@ fxrate chart [options] SOURCE TARGET
   A weekend/holiday date falls back to the previous ECB business day's rate (noted on stderr); a future date (after the latest available ECB day) falls back to that latest day (also noted on stderr); a date outside the locally covered range skips the full-CSV sync (a re-download imports the same full history, so it cannot cover the date; `-u/--update` forces the sync); a date with no history at all (before the earliest available) is a runtime error (exit 1); an invalid date format is a usage error (exit 2)
 - `-p`, `--provider <name>` — rates source override: `frankfurter` (default) or `exchange-api`.
   Unknown values or unknown options are usage errors (exit 2)
-- Amounts must parse as finite numbers; missing arguments and invalid amounts are usage errors (exit 2).
+- Amounts must parse as finite numbers and may be negative — a token starting with `-` followed by a digit or dot is always an amount, never an option. Missing arguments and invalid amounts are usage errors (exit 2).
   `-h`/`--help` exits 0; `-V`/`--version` (both commands) prints `fxrate <version>` to stdout and exits 0
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache, unknown source currency, chart with no history data, convert `--date` with no ECB history on or before that date) · `2` usage error
 

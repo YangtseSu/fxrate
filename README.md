@@ -52,10 +52,9 @@ Convert `AMOUNT` units of `SOURCE` into one or more `TARGET` currencies using
 the locally cached base-EUR rates snapshot. Conversions are fully offline once
 the snapshot is available.
 
-Positional arguments:
+- `AMOUNT` — amount to convert; a finite number (e.g. `100`, `12.5`), which
+  may be negative (e.g. `-100`). Required
 
-- `AMOUNT` — amount to convert; a finite number (e.g. `100`, `12.5`). Required
-- `SOURCE` — source currency code (case-insensitive, e.g. `USD`). Required
 - `TARGET...` — one or more target currency codes. If omitted, the
   multi-currency view over the configured `currencies` list is shown
 

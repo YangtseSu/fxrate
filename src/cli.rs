@@ -58,7 +58,7 @@ fn subcommand_index(args: &[String]) -> Option<usize> {
     let mut iter = args.iter().enumerate();
     while let Some((index, arg)) = iter.next() {
         let arg = arg.as_str();
-        if !arg.starts_with('-') {
+        if !arg.starts_with('-') || negative_number(arg) {
             return (arg == "chart").then_some(index);
         }
         if option_takes_value(arg) {
@@ -75,6 +75,12 @@ fn option_takes_value(arg: &str) -> bool {
         arg,
         "-p" | "--provider" | "-d" | "--date" | "--from" | "--to" | "--format" | "--output"
     )
+}
+
+// `-` followed by a digit or a dot is a negative amount, not an option
+// (`fxrate -100 USD CNY`); any other `-`-prefixed token stays an option.
+fn negative_number(arg: &str) -> bool {
+    matches!(arg.as_bytes().get(1), Some(b'0'..=b'9') | Some(b'.'))
 }
 
 fn parse_convert_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Command, i32> {
@@ -120,7 +126,7 @@ fn parse_convert_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Comm
                 println!("fxrate {}", env!("CARGO_PKG_VERSION"));
                 return Err(0);
             }
-            _ if arg.starts_with('-') => {
+            _ if arg.starts_with('-') && !negative_number(arg) => {
                 eprintln!("{}", style::error(format!("unknown option {arg}")));
                 usage();
                 return Err(2);
@@ -434,5 +440,25 @@ mod tests {
         assert!(convert.force);
         assert_eq!(convert.source, "USD");
         assert_eq!(convert.targets, vec!["CNY", "GBP"]);
+    }
+
+    #[test]
+    fn negative_amounts_are_positionals_not_options() {
+        let command = dispatch(&argv(&["-100", "USD", "CNY"])).expect("parsed");
+        let Command::Convert(convert) = command else {
+            panic!("expected convert, got chart");
+        };
+        assert_eq!(convert.amount, -100.0);
+        assert_eq!(convert.source, "USD");
+        let command = dispatch(&argv(&["-.5", "USD", "CNY"])).expect("parsed");
+        let Command::Convert(convert) = command else {
+            panic!("expected convert, got chart");
+        };
+        assert_eq!(convert.amount, -0.5);
+        // A negative amount starts the operands like `1.5 chart` does.
+        assert_eq!(subcommand_index(&argv(&["-100", "chart"])), None);
+        // `--100` and a bare `-` are not amounts; they stay options.
+        assert_eq!(dispatch(&argv(&["--100", "USD", "CNY"])), Err(2));
+        assert_eq!(dispatch(&argv(&["-", "USD", "CNY"])), Err(2));
     }
 }
