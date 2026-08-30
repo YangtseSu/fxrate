@@ -83,6 +83,10 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
                 usage();
                 return Err(0);
             }
+            "-V" | "--version" => {
+                println!("fxrate {}", env!("CARGO_PKG_VERSION"));
+                return Err(0);
+            }
             _ if arg.starts_with('-') => {
                 eprintln!("{}", style::error(format!("unknown option {arg}")));
                 usage();
@@ -218,6 +222,10 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
                 chart_usage();
                 return Err(0);
             }
+            "-V" | "--version" => {
+                println!("fxrate {}", env!("CARGO_PKG_VERSION"));
+                return Err(0);
+            }
             _ if arg.starts_with('-') => {
                 eprintln!("{}", style::error(format!("unknown option {arg}")));
                 chart_usage();
@@ -285,7 +293,8 @@ Options:
   -d, --date <date>       use the ECB historical rate for a date (YYYY-MM-DD)
   -u, --update            force-refresh rates (ignore cache age)
   -p, --provider <name>   rates source: frankfurter (default) or exchange-api
-  -h, --help              show this help and exit 0"
+  -h, --help              show this help and exit 0
+  -V, --version           print version and exit 0"
     );
 }
 
@@ -302,6 +311,7 @@ Options:
   --output <path>         write the chart to a file instead of stdout
   -p, --provider <name>   history source: ecb (default)
   -u, --update            force re-download of historical rates
-  -h, --help              show this help"
+  -h, --help              show this help
+  -V, --version           print version and exit 0"
     );
 }

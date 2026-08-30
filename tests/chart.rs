@@ -161,6 +161,12 @@ fn convert_usage_errors_exit_2() {
     assert_eq!(run(&home, &["notanumber", "USD"]).status.code(), Some(2));
     assert_eq!(run(&home, &["100"]).status.code(), Some(2));
     assert_eq!(run(&home, &["--help"]).status.code(), Some(0));
+    let version = run(&home, &["--version"]);
+    assert_eq!(version.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout),
+        format!("fxrate {}\n", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]
@@ -482,6 +488,7 @@ fn chart_usage_errors_exit_2() {
         Some(2)
     );
     assert_eq!(run(&home, &["chart", "--help"]).status.code(), Some(0));
+    assert_eq!(run(&home, &["chart", "--version"]).status.code(), Some(0));
 }
 
 #[test]

@@ -109,7 +109,7 @@ fxrate chart [options] SOURCE TARGET
 - `-p`, `--provider <name>` — rates source override: `frankfurter` (default) or `exchange-api`.
   Unknown values or unknown options are usage errors (exit 2)
 - Amounts must parse as finite numbers; missing arguments and invalid amounts are usage errors (exit 2).
-  `-h`/`--help` exits 0
+  `-h`/`--help` exits 0; `-V`/`--version` (both commands) prints `fxrate <version>` to stdout and exits 0
 - Exit codes: `0` success · `1` runtime error (fetch failed with no cache, unknown source currency, chart with no history data, convert `--date` with no ECB history on or before that date) · `2` usage error
 
 ### Chart command
