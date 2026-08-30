@@ -8,11 +8,13 @@ offline after the first sync.
 ## Features
 
 - Offline conversion from a locally cached rates snapshot
-- Automatic refresh when the cache is older than a configurable interval (default 24h); a failed refresh falls back to the stale cache with a notice and the last rates date
+- Automatic refresh when the cache is older than a configurable interval
+  (default 24h); a failed refresh falls back to the cached rates
 - `-u` / `--update` to force a refresh
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
-- Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day, and dates past the available history fall back to the latest known day without re-downloading
+- Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB rate for
+  that day (weekends/holidays fall back to the previous business day)
 - Historical charts (`fxrate chart`) from ECB reference rates: a stats panel
   (current, high/low with dates, change, average, volatility) above a
   fixed-size text chart (textplots), plus CSV/JSON output
@@ -61,14 +63,12 @@ Options:
 
 - `-u`, `--update` — force a refresh of the rates snapshot, ignoring cache age
   (a failed force-refresh exits 1)
-- `-p`, `--provider <name>` — rates source override: `frankfurter` (default)
-  or `exchange-api`. Unknown providers are a usage error (exit 2); this
-  overrides the config `provider` value
-- `-d`, `--date <date>` — convert at the ECB historical rate for `YYYY-MM-DD`
-  instead of the live snapshot. A weekend/holiday date falls back to the
-  previous ECB business day (noted on stderr); a date with no history at all
-  is a runtime error (exit 1). The `-p/--provider` selection is ignored
-  (historical rates are always ECB). An invalid date is a usage error (exit 2)
+- `-p`, `--provider <name>` — `frankfurter` (default) or `exchange-api`;
+  overrides the config value
+- `-d`, `--date <date>` — convert at the ECB historical rate for
+  `YYYY-MM-DD`; weekends/holidays fall back to the previous business day,
+  and the provider selection is ignored. An invalid date is a usage error
+  (exit 2)
 - `-h`, `--help` — show the convert usage and exit 0
 - `-V`, `--version` — print the version and exit 0
 
@@ -85,22 +85,14 @@ Positional arguments:
 
 Options:
 
-- `--from <date>` — inclusive start date, `YYYY-MM-DD`. Default: earliest
-  available data. A date before the covered history is clamped to it with
-  a stderr note; a date after the last available day is a runtime error
-  (exit 1) unless the live snapshot can serve the day
-- `--to <date>` — inclusive end date, `YYYY-MM-DD`. Default: latest available
-  data (the last ECB day, extended to the live snapshot date under the
-  live-tail rule). Must not be earlier than `--from` (otherwise a usage
-  error, exit 2). A date before the covered history is a runtime error
-  (exit 1); a date after the last ECB day is clamped down with a stderr
-  note, and the live tail can still extend the chart from there
+- `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds. Default:
+  earliest / latest available data, with the end extended to the cached
+  snapshot's date when reachable. Out-of-range bounds are clamped with a
+  stderr note, or rejected (exit 1) when nothing can be charted
 - `--format <format>` — `csv`, `json`, `text`, or `auto` (default). `auto`
   emits a text chart on a TTY (or when `--output` is given) and CSV otherwise
-- `--output <path>` — write the chart to a file instead of stdout; with
-  `auto` the file receives the text chart (never terminal escape sequences)
-- `-p`, `--provider <name>` — history source; only `ecb` (default) is
-  accepted. Anything else is a usage error (exit 2)
+- `--output <path>` — write the chart to a plain-text file instead of stdout
+- `-p`, `--provider <name>` — history source; only `ecb` (default)
 - `-u`, `--update` — force re-download of the ECB full history
 - `-h`, `--help` — show the chart usage and exit 0
 - `-V`, `--version` — print the version and exit 0
@@ -150,9 +142,8 @@ Config file: `$XDG_CONFIG_HOME/fxrate/config.json` (default
 
 - `update_interval`: duration string such as `24h`, `90m`, `1h30m`, or `7d`
   (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`; default `24h`)
-- `provider`: rates source, `frankfurter` (default) or `exchange-api`. Invalid
-  values warn and fall back to `frankfurter`; the CLI `-p` / `--provider`
-  overrides the config value. Changing provider triggers an immediate refresh
+- `provider`: `frankfurter` (default) or `exchange-api`; the CLI `-p`
+  overrides it, and changing it triggers an immediate refresh
 - `multi_view`: show the default list after explicit targets (default `true`).
   With no targets, the multi-currency view is always shown
 - `currencies`: default multi-currency view list
@@ -176,31 +167,22 @@ mv ~/.local/share/huobi ~/.local/share/fxrate # rates.json, history.db
 ```
 
 Substitute your own `XDG_CONFIG_HOME` / `XDG_DATA_HOME` if you override them.
-Skipping the move is safe: `fxrate` writes a default config and re-downloads the
-rates snapshot and the ECB history on first use. Afterwards you can remove the
-old `huobi` binary or package.
+Skipping the move is safe: `fxrate` starts fresh and re-downloads on first use.
 
 ## Rate providers
 
-Rates are fetched from one of two providers:
-
-- **Frankfurter** (default): `GET https://api.frankfurter.dev/v2/rates?base=EUR`
-- **exchange-api**: primary endpoint
-  `GET https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.min.json`,
-  with `https://latest.currency-api.pages.dev/v1/currencies/eur.min.json` as
-  fallback
-
-Available currencies depend on the selected provider and may change.
+Rates come from one of two providers: **Frankfurter** (default) or
+**exchange-api** (with a fallback endpoint). Available currencies depend on
+the selected provider and may change.
 
 ## Historical rates
 
-- Both `fxrate chart` and `fxrate --date` use the ECB reference rates
-([eurofxref-hist.zip](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip),
-updated once per working day around 16:00 CET, for information only).
-The full history is synced into `history.db` on first use and refreshed
-when a requested date range is not covered locally or with `-u/--update`;
-covered ranges never touch the network. Old currency columns and missing
-entries (`N/A`) are handled automatically.
+Both `fxrate chart` and `fxrate --date` use the
+[ECB reference rates](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip),
+updated once per working day. The full history is synced into `history.db`
+on first use and only re-downloaded when a requested range is not covered
+or with `-u/--update`. Missing entries and old currency columns are handled
+automatically.
 
 ## License
 
