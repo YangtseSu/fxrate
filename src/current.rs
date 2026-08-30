@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Read;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::provider::Provider;
@@ -21,8 +22,9 @@ pub const EXCHANGE_API_FALLBACK_URL: &str =
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 /// Cap for the small JSON rate responses (convert command).
 pub const MAX_RESPONSE_SIZE: usize = 1 << 20;
-/// Cap for the ECB full-history zip; the CSV alone is ~2 MiB.
-pub const MAX_HISTORY_RESPONSE_SIZE: usize = 64 << 20;
+/// Cap for the ECB full-history zip; the CSV alone is ~2 MiB, so 16 MiB
+/// leaves ample headroom without admitting absurd memory spikes.
+pub const MAX_HISTORY_RESPONSE_SIZE: usize = 16 << 20;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RateSnapshot {
@@ -46,9 +48,25 @@ struct ApiRate {
 /// non-success statuses and oversized bodies. The body is streamed under a
 /// hard cap so a response that lies about its Content-Length never buffers
 /// fully in memory.
+/// The process-wide HTTP client: one connection pool, built once, so
+/// repeat fetches (e.g. the exchange-api fallback) never pay client
+/// construction or a fresh TLS backend setup again.
+fn http_client() -> &'static Client {
+    static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        Client::builder()
+            .timeout(HTTP_TIMEOUT)
+            .build()
+            .expect("HTTP client construction with only a timeout cannot fail")
+    });
+    &CLIENT
+}
+
+/// Fetch a URL with a response size cap, returning an error for
+/// non-success statuses and oversized bodies. The body is streamed under a
+/// hard cap so a response that lies about its Content-Length never buffers
+/// fully in memory.
 pub fn get_bytes(url: &str, max_size: usize) -> Result<Vec<u8>, Box<dyn Error>> {
-    let client = Client::builder().timeout(HTTP_TIMEOUT).build()?;
-    let response = client.get(url).send()?;
+    let response = http_client().get(url).send()?;
     let status = response.status();
     // Reject an announced oversized body before reading anything, then
     // stream with a hard cap: at most max_size + 1 bytes are ever buffered.
