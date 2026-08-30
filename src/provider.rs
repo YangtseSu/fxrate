@@ -36,6 +36,12 @@ impl Provider {
             .join(", ")
     }
 
+    /// Whether `name` (case-insensitive, alias-aware via `from_name`)
+    /// resolves to one of `providers`.
+    pub fn accepted(name: &str, providers: &[Provider]) -> bool {
+        Provider::from_name(name).is_some_and(|provider| providers.contains(&provider))
+    }
+
     /// Providers accepted by the convert command (`-p/--provider`).
     pub const CONVERT_PROVIDERS: [Provider; 2] = [Provider::Frankfurter, Provider::ExchangeApi];
 
@@ -81,5 +87,32 @@ mod tests {
             "frankfurter, exchange-api"
         );
         assert_eq!(Provider::names(&Provider::CHART_PROVIDERS), "ecb");
+    }
+
+    #[test]
+    fn accepted_resolves_aliases_and_respects_the_whitelist() {
+        assert!(Provider::accepted(
+            "exchange-api",
+            &Provider::CONVERT_PROVIDERS
+        ));
+        assert!(Provider::accepted(
+            "exchangeapi",
+            &Provider::CONVERT_PROVIDERS
+        ));
+        assert!(Provider::accepted(
+            "EXCHANGE-API",
+            &Provider::CONVERT_PROVIDERS
+        ));
+        assert!(Provider::accepted(
+            "Frankfurter",
+            &Provider::CONVERT_PROVIDERS
+        ));
+        assert!(!Provider::accepted("ecb", &Provider::CONVERT_PROVIDERS));
+        assert!(Provider::accepted("ecb", &Provider::CHART_PROVIDERS));
+        assert!(!Provider::accepted(
+            "frankfurter",
+            &Provider::CHART_PROVIDERS
+        ));
+        assert!(!Provider::accepted("fixer", &Provider::CONVERT_PROVIDERS));
     }
 }

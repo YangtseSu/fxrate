@@ -164,6 +164,20 @@ fn convert_usage_errors_exit_2() {
 }
 
 #[test]
+fn convert_accepts_provider_aliases() {
+    let home = temp_home("alias");
+    seed_rates(&home);
+    for name in ["exchange-api", "exchangeapi", "EXCHANGE-API"] {
+        let out = run(&home, &["-p", name, "100", "USD", "CNY"]);
+        assert!(
+            out.status.success(),
+            "-p {name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn convert_date_uses_ecb_historical_rates() {
     let home = temp_home("conv-date");
     seed_history(&home, "ecb");

@@ -81,6 +81,7 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 - `update_interval`: duration string such as `24h` or `1h30m`; auto-refresh threshold (default `24h`).
   A missing or empty value uses 24h; malformed or out-of-range values warn and fall back to 24h
 - `provider`: rates source, `frankfurter` (default) or `exchange-api`.
+  The alias `exchangeapi` is accepted for both the config key and `-p/--provider` (case-insensitive).
   Invalid values warn and fall back to frankfurter; the CLI `-p/--provider` overrides the config value
 - `multi_view`: whether the default multi-currency list is appended after explicit targets.
   Default `true`; an absent field also means enabled (backwards compatible).

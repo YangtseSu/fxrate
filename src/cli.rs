@@ -92,10 +92,7 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
         }
     }
     if let Some(name) = &provider {
-        if !Provider::CONVERT_PROVIDERS
-            .iter()
-            .any(|provider| provider.name() == name.to_ascii_lowercase())
-        {
+        if !Provider::accepted(name, &Provider::CONVERT_PROVIDERS) {
             let valid = Provider::names(&Provider::CONVERT_PROVIDERS);
             eprintln!(
                 "{}",
@@ -230,10 +227,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
         }
     }
     if let Some(name) = &provider {
-        if !Provider::CHART_PROVIDERS
-            .iter()
-            .any(|provider| provider.name() == name.to_ascii_lowercase())
-        {
+        if !Provider::accepted(name, &Provider::CHART_PROVIDERS) {
             let valid = Provider::names(&Provider::CHART_PROVIDERS);
             eprintln!(
                 "{}",
