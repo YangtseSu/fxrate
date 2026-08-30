@@ -227,6 +227,7 @@ fn import_ecb_history(
     Ok((start, end))
 }
 
+/// Record the synced `[start, end]` range and prune older rows it covers.
 fn upsert_coverage(
     conn: &Connection,
     provider: Provider,
@@ -245,6 +246,16 @@ fn upsert_coverage(
             end.to_string(),
             fetched_at
         ],
+    )?;
+    // Each sync downloads the full history, so successive syncs only advance
+    // `end_date` and the conflict key rarely hits: without pruning, the table
+    // would grow one stale row per sync. Rows sticking out on either side of
+    // the new range are kept.
+    conn.execute(
+        "DELETE FROM history_coverage
+         WHERE provider = ?1 AND start_date >= ?2 AND end_date <= ?3
+           AND NOT (start_date = ?2 AND end_date = ?3)",
+        params![provider.name(), start.to_string(), end.to_string()],
     )?;
     Ok(())
 }
@@ -589,7 +600,8 @@ mod tests {
             !coverage_covers(&conn, Provider::Ecb, date("2025-01-02"), date("2025-04-01")).unwrap()
         );
 
-        // A newer, wider sync replaces the previous row for coverage lookup.
+        // A newer, wider sync subsumes the previous row: lookups use the wide
+        // range and the stale narrower row is pruned.
         upsert_coverage(
             &conn,
             Provider::Ecb,
@@ -598,9 +610,29 @@ mod tests {
             "now",
         )
         .unwrap();
+        let row_count = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM history_coverage WHERE provider = ?1",
+                params![Provider::Ecb.name()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
         let coverage = coverage_range(&conn, Provider::Ecb).unwrap().unwrap();
         assert_eq!(coverage.start, date("2024-12-02"));
         assert_eq!(coverage.end, date("2025-04-30"));
+        assert_eq!(row_count(&conn), 1);
+
+        // A row the new range does not cover is kept.
+        upsert_coverage(
+            &conn,
+            Provider::Ecb,
+            date("2020-01-02"),
+            date("2020-12-31"),
+            "now",
+        )
+        .unwrap();
+        assert_eq!(row_count(&conn), 2);
     }
     #[test]
     fn rate_on_date_returns_stored_value_or_none() {
