@@ -605,7 +605,7 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
 
 fn dedupe_targets(currencies: &[String], source: &str, exclude: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
-    seen.insert(source.to_owned());
+    seen.insert(source.to_uppercase());
     for currency in exclude {
         seen.insert(currency.to_uppercase());
     }
@@ -635,6 +635,20 @@ mod tests {
         ];
         let excluded = vec!["gbp".to_owned()];
         assert_eq!(dedupe_targets(&currencies, "USD", &excluded), vec!["EUR"]);
+    }
+
+    #[test]
+    fn lowercase_source_is_still_filtered() {
+        // The parser uppercases the source, but this function must not
+        // depend on that upstream normalization.
+        assert_eq!(
+            dedupe_targets(&["usd".to_owned()], "usd", &[]),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            dedupe_targets(&["USD".to_owned()], "usd", &[]),
+            Vec::<String>::new()
+        );
     }
 
     fn snapshot() -> current::RateSnapshot {
