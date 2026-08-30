@@ -219,6 +219,52 @@ fn convert_accepts_provider_aliases() {
 }
 
 #[test]
+fn convert_stale_cache_degrades_with_warning() {
+    let home = temp_home("stale-cache");
+    // fetched_at far in the past: past the update interval, so a refresh
+    // is attempted and (network blocked) fails; the cached snapshot must
+    // still serve the conversion.
+    let rates = serde_json::json!({
+        "base": "EUR",
+        "date": "2026-08-17",
+        "fetched_at": "2020-01-01T00:00:00Z",
+        "provider": "frankfurter",
+        "rates": {"USD": 1.1, "EUR": 1.0, "CNY": 7.8}
+    });
+    std::fs::write(home.join("fxrate").join("rates.json"), rates.to_string()).unwrap();
+    let out = run(&home, &["100", "USD", "CNY"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("failed to update rates"), "{stderr}");
+    assert!(
+        stderr.contains("using cached rates (date 2026-08-17, provider frankfurter)"),
+        "{stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The fallback keeps serving the cache and the footer still reports
+    // the cached rate date, not an update.
+    assert!(stdout.contains("$100.00 USD ="), "{stdout}");
+    assert!(stdout.contains("rates date 2026-08-17"), "{stdout}");
+    assert!(!stdout.contains("rates updated"), "{stdout}");
+}
+
+#[test]
+fn convert_force_update_failure_exits_1() {
+    let home = temp_home("force-fail");
+    seed_rates(&home);
+    // -u must actually attempt a refresh: with the network blocked the
+    // attempt fails and force-update failure is fatal, cache or not.
+    let out = run(&home, &["-u", "100", "USD"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("failed to update rates"), "{stderr}");
+}
+
+#[test]
 fn convert_date_uses_ecb_historical_rates() {
     let home = temp_home("conv-date");
     seed_history(&home, "ecb");
