@@ -47,26 +47,25 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
 /// Largest allowed gap in days between the last ECB day and the live
 /// snapshot date for the chart's live tail: a weekend plus one holiday.
 const LIVE_TAIL_MAX_GAP_DAYS: i64 = 4;
-fn fatal(message: &str) -> ! {
-    eprintln!("{}", style::error(message));
-    process::exit(1);
-}
 
 fn main() {
     let command = match cli::parse_args() {
         Ok(command) => command,
         Err(code) => process::exit(code),
     };
-    match command {
+    let result = match command {
         Command::Convert(args) => run_convert(args),
         Command::Chart(args) => run_chart(args),
+    };
+    if let Err(error) = result {
+        eprintln!("{}", style::error(error.to_string()));
+        process::exit(1);
     }
 }
 
-fn run_convert(args: ConvertArgs) {
+fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn Error>> {
     if let Some(date) = args.date {
-        run_convert_historical(args, date);
-        return;
+        return run_convert_historical(args, date);
     }
     let ConvertArgs {
         force,
@@ -137,12 +136,15 @@ fn run_convert(args: ConvertArgs) {
                 snapshot = Some(fresh);
                 updated = true;
             }
-            Err(error) if force => fatal(&format!("failed to update rates: {error}")),
-            Err(error) if snapshot.is_none() => {
-                fatal(&format!("no local rate cache and update failed: {error}"))
-            }
             Err(error) => {
-                let cached = snapshot.as_ref().expect("cache exists in fallback branch");
+                if force {
+                    return Err(boxed_error(format!("failed to update rates: {error}")));
+                }
+                let Some(cached) = snapshot.as_ref() else {
+                    return Err(boxed_error(format!(
+                        "no local rate cache and update failed: {error}"
+                    )));
+                };
                 let cached_provider = if cached.provider.is_empty() {
                     "unknown"
                 } else {
@@ -158,7 +160,9 @@ fn run_convert(args: ConvertArgs) {
             }
         }
     }
-    let snapshot = snapshot.expect("fatal exits when no snapshot is available");
+    let Some(snapshot) = snapshot else {
+        return Err(boxed_error("no local rate cache available"));
+    };
     render_convert(
         &snapshot,
         amount,
@@ -167,7 +171,7 @@ fn run_convert(args: ConvertArgs) {
         &config,
         updated,
         style::stdout_color(),
-    );
+    )
 }
 
 /// Render the conversion table and footer for a resolved rate snapshot.
@@ -184,13 +188,14 @@ fn render_convert(
     config: &storage::Config,
     updated: bool,
     color: bool,
-) {
+) -> Result<(), Box<dyn Error>> {
     if let Err(error) = current::currency_rate(snapshot, source) {
-        fatal(&error.to_string());
+        return Err(boxed_error(error.to_string()));
     }
     for line in convert_lines(snapshot, amount, source, targets, config, updated, color) {
         println!("{line}");
     }
+    Ok(())
 }
 
 /// Build the conversion table lines with the footer last: converted amounts
@@ -317,22 +322,20 @@ fn convert_lines(
 /// Historical conversion: resolve EUR-based rates for `date` from the ECB
 /// history database and reuse the live rendering path. The `-p/--provider`
 /// selection is ignored here because historical rates are always ECB.
-fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
+fn run_convert_historical(args: ConvertArgs, date: NaiveDate) -> Result<(), Box<dyn Error>> {
     let provider = Provider::Ecb;
-    let mut conn = match history::open_history_db() {
-        Ok(conn) => conn,
-        Err(error) => fatal(&format!("failed to open history database: {error}")),
-    };
-    let covered = match history::coverage_covers(&conn, provider, date, date) {
-        Ok(covered) => covered,
-        Err(error) => fatal(&format!("failed to check history coverage: {error}")),
-    };
+    let mut conn = history::open_history_db()
+        .map_err(|error| boxed_error(format!("failed to open history database: {error}")))?;
+    let covered = history::coverage_covers(&conn, provider, date, date)
+        .map_err(|error| boxed_error(format!("failed to check history coverage: {error}")))?;
     if args.force || !covered {
         match history::sync_history(&mut conn, provider) {
             Ok(_) => {}
-            Err(error) if !covered => fatal(&format!(
-                "no historical rates available for {date} and update failed: {error}"
-            )),
+            Err(error) if !covered => {
+                return Err(boxed_error(format!(
+                    "no historical rates available for {date} and update failed: {error}"
+                )));
+            }
             Err(error) => {
                 eprintln!(
                     "{}",
@@ -345,10 +348,16 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
     }
     let effective_date = match history::prev_trading_day(&conn, provider, date) {
         Ok(Some(effective)) => effective,
-        Ok(None) => fatal(&format!(
-            "no historical rates available on or before {date}"
-        )),
-        Err(error) => fatal(&format!("failed to read history coverage: {error}")),
+        Ok(None) => {
+            return Err(boxed_error(format!(
+                "no historical rates available on or before {date}"
+            )));
+        }
+        Err(error) => {
+            return Err(boxed_error(format!(
+                "failed to read history coverage: {error}"
+            )));
+        }
     };
     if effective_date != date {
         eprintln!(
@@ -375,7 +384,11 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
                 rates.insert(code.clone(), rate);
             }
             Ok(None) => {}
-            Err(error) => fatal(&format!("failed to read historical rates: {error}")),
+            Err(error) => {
+                return Err(boxed_error(format!(
+                    "failed to read historical rates: {error}"
+                )));
+            }
         }
     }
     let snapshot = current::RateSnapshot {
@@ -393,10 +406,10 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) {
         &config,
         false,
         style::stdout_color(),
-    );
+    )
 }
 
-fn run_chart(args: ChartArgs) {
+fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
     let ChartArgs {
         force,
         provider: cli_provider,
@@ -427,21 +440,16 @@ fn run_chart(args: ChartArgs) {
         }
     };
 
-    let mut conn = match history::open_history_db() {
-        Ok(conn) => conn,
-        Err(error) => fatal(&format!("failed to open history database: {error}")),
-    };
-    let mut coverage = match history::coverage_range(&conn, provider) {
-        Ok(coverage) => coverage,
-        Err(error) => fatal(&format!("failed to read history coverage: {error}")),
-    };
+    let mut conn = history::open_history_db()
+        .map_err(|error| boxed_error(format!("failed to open history database: {error}")))?;
+    let mut coverage = history::coverage_range(&conn, provider)
+        .map_err(|error| boxed_error(format!("failed to read history coverage: {error}")))?;
     let mut need_sync = force || coverage.is_none();
     if !need_sync {
         if let (Some(from), Some(to)) = (from, to) {
-            need_sync = match history::coverage_covers(&conn, provider, from, to) {
-                Ok(covered) => !covered,
-                Err(error) => fatal(&format!("failed to check history coverage: {error}")),
-            };
+            need_sync = !history::coverage_covers(&conn, provider, from, to).map_err(|error| {
+                boxed_error(format!("failed to check history coverage: {error}"))
+            })?;
         }
     }
     if need_sync {
@@ -449,9 +457,11 @@ fn run_chart(args: ChartArgs) {
             Ok((start, end)) => {
                 coverage = Some(history::Coverage { start, end });
             }
-            Err(error) if coverage.is_none() => fatal(&format!(
-                "no historical rates available and update failed: {error}"
-            )),
+            Err(error) if coverage.is_none() => {
+                return Err(boxed_error(format!(
+                    "no historical rates available and update failed: {error}"
+                )));
+            }
             Err(error) => {
                 eprintln!(
                     "{}",
@@ -463,7 +473,7 @@ fn run_chart(args: ChartArgs) {
         }
     }
     let Some(coverage) = coverage else {
-        fatal("no historical rates available");
+        return Err(boxed_error("no historical rates available"));
     };
     let from = from.unwrap_or(coverage.start);
     let to_explicit = to.is_some();
@@ -513,34 +523,32 @@ fn run_chart(args: ChartArgs) {
         _ => None,
     };
 
-    let universe = match history::date_universe(&conn, provider, from, to) {
-        Ok(universe) => universe,
-        Err(error) => fatal(&format!("failed to read historical rates: {error}")),
-    };
+    let universe = history::date_universe(&conn, provider, from, to)
+        .map_err(|error| boxed_error(format!("failed to read historical rates: {error}")))?;
     if universe.is_empty() && live_splice.is_none() {
-        fatal(&format!("no historical rates between {from} and {to}"));
+        return Err(boxed_error(format!(
+            "no historical rates between {from} and {to}"
+        )));
     }
-    let load_series = |quote: &str| -> Vec<series::Point> {
+    let load_series = |quote: &str| -> Result<Vec<series::Point>, Box<dyn Error>> {
         if quote == "EUR" {
-            universe.iter().map(|date| (*date, 1.0)).collect()
+            Ok(universe.iter().map(|date| (*date, 1.0)).collect())
         } else {
-            match history::rate_series(&conn, provider, quote, from, to) {
-                Ok(series) => series,
-                Err(error) => fatal(&format!("failed to read historical rates: {error}")),
-            }
+            history::rate_series(&conn, provider, quote, from, to)
+                .map_err(|error| boxed_error(format!("failed to read historical rates: {error}")))
         }
     };
-    let source_series = load_series(&source);
+    let source_series = load_series(&source)?;
     if source_series.is_empty() && live_splice.is_none() {
-        fatal(&format!(
+        return Err(boxed_error(format!(
             "no historical rates for {source} between {from} and {to}"
-        ));
+        )));
     }
-    let target_series = load_series(&target);
+    let target_series = load_series(&target)?;
     if target_series.is_empty() && live_splice.is_none() {
-        fatal(&format!(
+        return Err(boxed_error(format!(
             "no historical rates for {target} between {from} and {to}"
-        ));
+        )));
     }
     let mut points = series::cross_series(&source_series, &target_series);
     if let Some((live_date, live_rate)) = live_splice {
@@ -551,9 +559,9 @@ fn run_chart(args: ChartArgs) {
         }
     }
     if points.is_empty() {
-        fatal(&format!(
+        return Err(boxed_error(format!(
             "no overlapping data for {source} and {target} between {from} and {to}"
-        ));
+        )));
     }
 
     let tty = io::stdout().is_terminal();
@@ -583,15 +591,16 @@ fn run_chart(args: ChartArgs) {
             };
             match output {
                 Some(path) => {
-                    if let Err(error) = fs::write(&path, text) {
-                        fatal(&format!("failed to write {}: {error}", path.display()));
-                    }
+                    fs::write(&path, text).map_err(|error| {
+                        boxed_error(format!("failed to write {}: {error}", path.display()))
+                    })?;
                 }
                 None => print!("{text}"),
             }
         }
         Format::Auto => unreachable!("auto resolved above"),
     }
+    Ok(())
 }
 
 fn dedupe_targets(currencies: &[String], source: &str, exclude: &[String]) -> Vec<String> {
