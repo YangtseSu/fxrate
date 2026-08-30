@@ -200,7 +200,7 @@ fn char_width(c: char) -> usize {
     }
 }
 
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
 

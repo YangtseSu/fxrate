@@ -243,14 +243,17 @@ fn convert_lines(
         .chain(multi_rows.iter())
         .map(|row| {
             let m = currency::meta(&row.code);
-            format!("{}{:.2}", m.symbol, row.value).len()
+            render::display_width(&format!("{}{:.2}", m.symbol, row.value))
         })
         .max()
         .unwrap_or(0);
 
     let source_meta = currency::meta(source);
     let amount_string = format!("{}{:.2}", source_meta.symbol, amount);
-    let padding = amount_string.len() + source.len() + 4;
+    // Display columns of the first row's prefix `{amount} {source} = `:
+    // the +4 is the one space after the amount plus the three of " = ".
+    // Display width, not bytes: multi-byte symbols (€, ¥) are one column.
+    let padding = render::display_width(&amount_string) + render::display_width(source) + 4;
     let indent = " ".repeat(padding);
 
     let render_row = |first: bool, row: &Row, color: bool| -> String {
@@ -295,7 +298,7 @@ fn convert_lines(
             // that would inflate the rule length.
             let sep_len = explicit_rows
                 .first()
-                .map(|row| render_row(true, row, false).len())
+                .map(|row| render::display_width(&render_row(true, row, false)))
                 .unwrap_or(padding);
             lines.push("-".repeat(sep_len));
         }
@@ -648,6 +651,32 @@ mod tests {
         assert_eq!(
             dedupe_targets(&["USD".to_owned()], "usd", &[]),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn convert_rows_align_across_multibyte_symbols() {
+        let config = storage::Config::default();
+        let lines = convert_lines(
+            &snapshot(),
+            100.0,
+            "CNY",
+            &["USD".to_owned()],
+            &config,
+            false,
+            false,
+        );
+        // lines: USD row, rule, CNY multi-view row, footer. "¥100.00 CNY = "
+        // is 14 display columns; the two-byte yen sign must not push the
+        // continuation rows' value column to the right.
+        assert_eq!(lines[2].len() - lines[2].trim_start().len(), 14);
+        // The rule line matches the first row's display width (the same
+        // display_width convention the chart panel uses).
+        assert!(lines[1].chars().all(|c| c == '-'), "lines: {lines:?}");
+        assert_eq!(
+            lines[1].len(),
+            render::display_width(&lines[0]),
+            "lines: {lines:?}"
         );
     }
 
