@@ -25,6 +25,10 @@ pub const MAX_RESPONSE_SIZE: usize = 1 << 20;
 /// Cap for the ECB full-history zip; the CSV alone is ~2 MiB, so 16 MiB
 /// leaves ample headroom without admitting absurd memory spikes.
 pub const MAX_HISTORY_RESPONSE_SIZE: usize = 16 << 20;
+/// Transient failures (connection errors, 5xx) are retried up to this many
+/// extra times with exponential backoff (500 ms, then 1 s).
+const HTTP_RETRIES: u32 = 2;
+const HTTP_RETRY_BACKOFF: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RateSnapshot {
@@ -44,10 +48,6 @@ struct ApiRate {
     rate: f64,
 }
 
-/// Fetch a URL with a response size cap, returning an error for
-/// non-success statuses and oversized bodies. The body is streamed under a
-/// hard cap so a response that lies about its Content-Length never buffers
-/// fully in memory.
 /// The process-wide HTTP client: one connection pool, built once, so
 /// repeat fetches (e.g. the exchange-api fallback) never pay client
 /// construction or a fresh TLS backend setup again.
@@ -55,8 +55,11 @@ fn http_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         Client::builder()
             .timeout(HTTP_TIMEOUT)
+            // Some endpoints (notably the ECB download) reject requests
+            // without a User-Agent.
+            .user_agent(concat!("fxrate/", env!("CARGO_PKG_VERSION")))
             .build()
-            .expect("HTTP client construction with only a timeout cannot fail")
+            .expect("HTTP client construction with a timeout and UA cannot fail")
     });
     &CLIENT
 }
@@ -64,9 +67,34 @@ fn http_client() -> &'static Client {
 /// Fetch a URL with a response size cap, returning an error for
 /// non-success statuses and oversized bodies. The body is streamed under a
 /// hard cap so a response that lies about its Content-Length never buffers
-/// fully in memory.
+/// fully in memory. Transient failures are retried with exponential
+/// backoff.
 pub fn get_bytes(url: &str, max_size: usize) -> Result<Vec<u8>, Box<dyn Error>> {
-    let response = http_client().get(url).send()?;
+    let mut last_error: Option<Box<dyn Error>> = None;
+    for attempt in 0..=HTTP_RETRIES {
+        if attempt > 0 {
+            std::thread::sleep(HTTP_RETRY_BACKOFF.mul_f64(2.0f64.powi(attempt as i32 - 1)));
+        }
+        match fetch_once(url, max_size) {
+            Ok(bytes) => return Ok(bytes),
+            Err((error, true)) => last_error = Some(error),
+            Err((error, false)) => return Err(error),
+        }
+    }
+    Err(last_error.expect("the loop runs at least one attempt"))
+}
+
+/// One fetch attempt with the response size cap. The flag marks a failure
+/// as retryable: connection-level errors and server (5xx) statuses are
+/// transient; client errors, oversized bodies, and read failures are final.
+fn fetch_once(url: &str, max_size: usize) -> Result<Vec<u8>, (Box<dyn Error>, bool)> {
+    let response = match http_client().get(url).send() {
+        Ok(response) => response,
+        Err(error) => {
+            let retryable = error.is_connect() || error.is_request();
+            return Err((Box::new(error), retryable));
+        }
+    };
     let status = response.status();
     // Reject an announced oversized body before reading anything, then
     // stream with a hard cap: at most max_size + 1 bytes are ever buffered.
@@ -74,25 +102,27 @@ pub fn get_bytes(url: &str, max_size: usize) -> Result<Vec<u8>, Box<dyn Error>> 
         .content_length()
         .is_some_and(|length| length > max_size as u64)
     {
-        return Err(crate::boxed_error(format!(
-            "API response exceeded {} bytes",
-            max_size
-        )));
+        return Err((
+            crate::boxed_error(format!("API response exceeded {} bytes", max_size)),
+            false,
+        ));
     }
     let mut bytes = Vec::new();
-    response.take(max_size as u64 + 1).read_to_end(&mut bytes)?;
+    if let Err(error) = response.take(max_size as u64 + 1).read_to_end(&mut bytes) {
+        return Err((error.into(), false));
+    }
     if bytes.len() > max_size {
-        return Err(crate::boxed_error(format!(
-            "API response exceeded {} bytes",
-            max_size
-        )));
+        return Err((
+            crate::boxed_error(format!("API response exceeded {} bytes", max_size)),
+            false,
+        ));
     }
     if !status.is_success() {
         let body = String::from_utf8_lossy(&bytes);
-        return Err(crate::boxed_error(format!(
-            "API returned {status}: {}",
-            body.trim()
-        )));
+        return Err((
+            crate::boxed_error(format!("API returned {status}: {}", body.trim())),
+            status.is_server_error(),
+        ));
     }
     Ok(bytes)
 }
@@ -273,6 +303,19 @@ mod tests {
     /// vars are scrubbed first: reqwest would otherwise honor a developer's
     /// HTTP_PROXY and route even localhost through it.
     fn serve(response: Vec<u8>) -> String {
+        scrub_proxy_env();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(&response).unwrap();
+        });
+        format!("http://127.0.0.1:{port}/capped")
+    }
+
+    fn scrub_proxy_env() {
         for variable in [
             "HTTP_PROXY",
             "http_proxy",
@@ -283,15 +326,6 @@ mod tests {
         ] {
             std::env::remove_var(variable);
         }
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 1024];
-            let _ = stream.read(&mut request);
-            stream.write_all(&response).unwrap();
-        });
-        format!("http://127.0.0.1:{port}/capped")
     }
 
     #[test]
@@ -312,6 +346,49 @@ mod tests {
         let url = serve(response);
         let error = get_bytes(&url, 1024).unwrap_err().to_string();
         assert!(error.contains("exceeded 1024 bytes"), "{error}");
+    }
+
+    #[test]
+    fn transient_server_errors_are_retried() {
+        scrub_proxy_env();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let responses: [&[u8]; 2] = [
+                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            ];
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 512];
+                loop {
+                    let read = stream.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..read]);
+                    if read == 0 || request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                // The shared client identifies itself (hyper writes
+                // header names lowercase on the wire).
+                let request = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                assert!(
+                    request.contains("user-agent: fxrate/"),
+                    "requests must carry a User-Agent: {request}"
+                );
+                stream.write_all(response).unwrap();
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/retry");
+        assert_eq!(get_bytes(&url, 1024).unwrap(), b"{}");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn client_errors_are_not_retried() {
+        let url = serve(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let error = get_bytes(&url, 1024).unwrap_err().to_string();
+        assert!(error.contains("API returned 404"), "{error}");
     }
 
     #[test]
