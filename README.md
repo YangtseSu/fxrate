@@ -121,35 +121,18 @@ fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --format csv
 fxrate chart USD CNY --from 2025-01-01 --to 2025-03-31 --output chart.txt
 ```
 
-The first chart run downloads the ECB full history (about 0.6 MB); afterwards
-everything works offline. On an interactive terminal the sync shows a spinner
-on stderr while it downloads, parses, and imports the rates; when stderr is
-piped or redirected nothing is printed. The text chart shows a stats box
-above the plot; the chart has an 80×15 canvas by default, replaced by a
-compact label-free chart on terminals shorter than 22 rows, and the box is colored
-(green/red change, bright-black chrome) only on a
-terminal — `NO_COLOR` disables it, and file/pipe output is always plain.
+The first chart run downloads the ECB full history; afterwards charts work
+offline. On an interactive terminal the sync shows a spinner on stderr.
+The text chart shows a stats box above the plot and is colored only on a
+terminal (`NO_COLOR` turns colors off; file and pipe output stay plain).
 Charts have no data for weekends/holidays and are never interpolated. When
-the range reaches the live snapshot's date — within 5 days of the last ECB
-day (the longest ECB publish gap: two consecutive holidays plus a weekend,
-e.g. Easter) — that day's point comes from `rates.json`
-(the same EUR-based cross math the convert command uses), so the chart's
-right edge matches `fxrate` convert; the default range extends to it. That
-snapshot-sourced point is marked `, live` in the stats panel and in the
-single-day line, so a jump caused by the live rate is not mistaken for an
-ECB fixing. A snapshot dated further back, or a currency missing from it,
-leaves the chart purely ECB. The chart never fetches live rates — it reads
-the cached `rates.json` as-is (run the convert command to refresh it). A
-single trading day (ECB or the live tail) prints
-`1 SOURCE = x TARGET (date)` — with `, live` when that day comes from the
-snapshot — instead of a chart; an empty range with neither ECB data nor a
-live point (e.g. a weekend with no rates cache) is a runtime error (exit 1).
+the cached rates snapshot reaches the chart's right edge, that point comes
+from the snapshot and is marked `, live`. A single trading day prints
+`1 SOURCE = x TARGET (date)` instead of a chart.
 
-Output shows the converted amounts and the rates date. Currencies without
-rate data are reported on stderr and skipped; valid conversions still print.
-Notices and warnings go to stderr. Exit codes: `0` success, `1` runtime
-error (for example, fetch failed with no cache or unknown source currency),
-and `2` usage error.
+Unknown currencies are warned about and skipped; valid conversions still
+print, and notices go to stderr. Exit codes: `0` success, `1` runtime
+error, `2` usage error.
 
 ## Configuration
 
