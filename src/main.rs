@@ -117,14 +117,13 @@ fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn Error>> {
     };
 
     let mut snapshot = match storage::load_rates() {
-        Ok(snapshot) => Some(snapshot),
+        Ok(Some(snapshot)) => Some(snapshot),
+        Ok(None) => None,
         Err(error) => {
-            if error.downcast_ref::<io::Error>().is_none() {
-                eprintln!(
-                    "{}",
-                    style::warning(format!("failed to read local rates: {error}"))
-                );
-            }
+            eprintln!(
+                "{}",
+                style::warning(format!("failed to read local rates: {error}"))
+            );
             None
         }
     };
@@ -444,14 +443,13 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
     // today's rate. The cache is used as-is (no fetch here): a missing or
     // unreadable cache simply disables the live tail.
     let snapshot = match storage::load_rates() {
-        Ok(snapshot) => Some(snapshot),
+        Ok(Some(snapshot)) => Some(snapshot),
+        Ok(None) => None,
         Err(error) => {
-            if error.downcast_ref::<io::Error>().is_none() {
-                eprintln!(
-                    "{}",
-                    style::warning(format!("failed to read local rates: {error}"))
-                );
-            }
+            eprintln!(
+                "{}",
+                style::warning(format!("failed to read local rates: {error}"))
+            );
             None
         }
     };

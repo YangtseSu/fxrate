@@ -161,9 +161,18 @@ pub fn load_config() -> Config {
     }
 }
 
-pub fn load_rates() -> Result<RateSnapshot, Box<dyn Error>> {
-    let bytes = fs::read(data_path())?;
+/// Load the cached snapshot: `Ok(None)` when no cache exists yet, the
+/// snapshot when it loads. A cache that is present but unreadable or
+/// unparsable is an error, not a missing cache, so callers can surface the
+/// real cause instead of treating it as a first run.
+pub fn load_rates() -> Result<Option<RateSnapshot>, Box<dyn Error>> {
+    let bytes = match fs::read(data_path()) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     serde_json::from_slice(&bytes)
+        .map(Some)
         .map_err(|error| crate::boxed_error(format!("corrupted rate cache: {error}")))
 }
 

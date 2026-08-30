@@ -151,6 +151,42 @@ fn convert_works_offline_from_seeded_cache() {
 }
 
 #[test]
+fn convert_warns_on_unreadable_cache() {
+    let home = temp_home("cache-denied");
+    // A directory where the cache file belongs: reading it fails for any
+    // user, deterministically, unlike a chmod-000 file under root.
+    std::fs::create_dir_all(home.join("fxrate").join("rates.json")).unwrap();
+    let out = run(&home, &["100", "USD"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to read local rates"),
+        "an unreadable cache must be surfaced, not treated as missing: {stderr}"
+    );
+}
+
+#[test]
+fn convert_is_silent_when_cache_is_missing() {
+    let home = temp_home("cache-missing");
+    let out = run(&home, &["100", "USD"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no local rate cache"), "{stderr}");
+    // A first run has no cache yet: that is normal, not a warning.
+    assert!(!stderr.contains("failed to read local rates"), "{stderr}");
+}
+
+#[test]
+fn convert_warns_on_corrupted_cache() {
+    let home = temp_home("cache-bad");
+    std::fs::write(home.join("fxrate").join("rates.json"), "not json").unwrap();
+    let out = run(&home, &["100", "USD"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("corrupted rate cache"), "{stderr}");
+}
+
+#[test]
 fn convert_usage_errors_exit_2() {
     let home = temp_home("usage");
     assert_eq!(
@@ -766,6 +802,24 @@ fn chart_live_point_replaces_last_ecb_day() {
         "{stdout}"
     );
     assert!(!stdout.contains("7.314285714285714"), "{stdout}");
+}
+
+#[test]
+fn chart_warns_on_unreadable_cache_and_still_plots_history() {
+    let home = temp_home("cache-denied-chart");
+    seed_history(&home, "ecb");
+    std::fs::create_dir_all(home.join("fxrate").join("rates.json")).unwrap();
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to read local rates"),
+        "an unreadable cache must be surfaced, not treated as missing: {stderr}"
+    );
+    // The live tail is disabled; the chart ends on the last ECB day.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let last = stdout.lines().last().unwrap_or_default();
+    assert!(last.starts_with("2025-01-06,"), "{stdout}");
 }
 
 #[test]
