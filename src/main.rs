@@ -719,12 +719,16 @@ mod tests {
         // is 14 display columns; the two-byte yen sign must not push the
         // continuation rows' value column to the right.
         assert_eq!(lines[2].len() - lines[2].trim_start().len(), 14);
-        // The rule line matches the first row's display width (the same
-        // display_width convention the chart panel uses).
+        // The rule line matches the first row's true width: the row is
+        // ASCII plus exactly one two-codepoint flag pair rendered as 2
+        // cells, so its visual width equals its char count. Measuring
+        // against chars().count() (not display_width itself) keeps the
+        // assertion from sharing a wrong measure with the code under test.
         assert!(lines[1].chars().all(|c| c == '-'), "lines: {lines:?}");
+        assert_eq!(lines[1].len(), lines[0].chars().count(), "lines: {lines:?}");
         assert_eq!(
-            lines[1].len(),
             render::display_width(&lines[0]),
+            lines[0].chars().count(),
             "lines: {lines:?}"
         );
     }

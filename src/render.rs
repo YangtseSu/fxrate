@@ -5,6 +5,7 @@
 
 use chrono::{Datelike, NaiveDate};
 use textplots::{Chart, LabelBuilder, LabelFormat, Plot, Shape, TickDisplay, TickDisplayBuilder};
+use unicode_width::UnicodeWidthStr;
 
 use crate::series::{stats as series_stats, Point, Stats};
 
@@ -177,31 +178,12 @@ const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
-/// Cell width in terminal columns. Everything generated here is ASCII except
-/// box-drawing characters (1 cell each, so plain char counting is right) and
-/// the status emoji (East-Asian wide); the CJK ranges are covered defensively
-/// so panel alignment survives non-ASCII content in future.
-fn char_width(c: char) -> usize {
-    match c as u32 {
-        0x1100..=0x115F
-        | 0x2E80..=0x303E
-        | 0x3041..=0x33FF
-        | 0x3400..=0x4DBF
-        | 0x4E00..=0x9FFF
-        | 0xA000..=0xA4CF
-        | 0xAC00..=0xD7A3
-        | 0xF900..=0xFAFF
-        | 0xFE30..=0xFE6F
-        | 0xFF00..=0xFF60
-        | 0xFFE0..=0xFFE6
-        | 0x1F000..=0x1FAFF
-        | 0x20000..=0x3FFFD => 2,
-        _ => 1,
-    }
-}
-
+/// Display columns of a string: unicode-width's `UnicodeWidthStr`, which
+/// measures a regional-indicator flag pair as the 2 cells terminals render
+/// (per-codepoint counting inflates it to 4) and also covers VS16, ZWJ
+/// sequences, and skin-tone modifiers that hand-rolled range tables miss.
 pub(crate) fn display_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    s.width()
 }
 
 /// One label/value pair of the stats panel. `tint` is the ANSI color for the
@@ -881,8 +863,12 @@ mod tests {
     }
 
     #[test]
-    fn display_width_counts_wide_emoji_twice() {
+    fn display_width_counts_flags_and_wide_emoji_correctly() {
         assert_eq!(display_width("USD/CNY Trend"), 13);
+        // A regional-indicator flag pair is the 2 cells terminals render,
+        // not 4 from summing per-codepoint widths.
+        assert_eq!(display_width("\u{1F1FA}\u{1F1F8}"), 2);
+        assert_eq!(display_width("\u{1F1FA}\u{1F1F8} Euro"), 7);
         assert_eq!(display_width("Change: 🔴 -1.24%"), 17);
     }
 

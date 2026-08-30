@@ -361,6 +361,7 @@ dependencies = [
  "serde_json",
  "terminal_size",
  "textplots",
+ "unicode-width",
  "zip",
 ]
 
