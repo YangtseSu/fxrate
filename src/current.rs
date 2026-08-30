@@ -8,6 +8,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use std::io::Read;
 use std::time::Duration;
 
 use crate::provider::Provider;
@@ -42,12 +43,26 @@ struct ApiRate {
 }
 
 /// Fetch a URL with a response size cap, returning an error for
-/// non-success statuses and oversized bodies.
+/// non-success statuses and oversized bodies. The body is streamed under a
+/// hard cap so a response that lies about its Content-Length never buffers
+/// fully in memory.
 pub fn get_bytes(url: &str, max_size: usize) -> Result<Vec<u8>, Box<dyn Error>> {
     let client = Client::builder().timeout(HTTP_TIMEOUT).build()?;
     let response = client.get(url).send()?;
     let status = response.status();
-    let bytes = response.bytes()?.to_vec();
+    // Reject an announced oversized body before reading anything, then
+    // stream with a hard cap: at most max_size + 1 bytes are ever buffered.
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_size as u64)
+    {
+        return Err(crate::boxed_error(format!(
+            "API response exceeded {} bytes",
+            max_size
+        )));
+    }
+    let mut bytes = Vec::new();
+    response.take(max_size as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > max_size {
         return Err(crate::boxed_error(format!(
             "API response exceeded {} bytes",
@@ -181,6 +196,8 @@ pub fn cache_needs_refresh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::net::TcpListener;
 
     #[test]
     fn exchange_api_payload_is_parsed() {
@@ -232,5 +249,56 @@ mod tests {
     #[test]
     fn ecb_is_not_a_convert_provider() {
         assert!(fetch_rates(Provider::Ecb).is_err());
+    }
+
+    /// Serve one canned HTTP response on a random localhost port. Proxy env
+    /// vars are scrubbed first: reqwest would otherwise honor a developer's
+    /// HTTP_PROXY and route even localhost through it.
+    fn serve(response: Vec<u8>) -> String {
+        for variable in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
+            std::env::remove_var(variable);
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(&response).unwrap();
+        });
+        format!("http://127.0.0.1:{port}/capped")
+    }
+
+    #[test]
+    fn oversized_content_length_is_rejected_before_reading() {
+        let url = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 999999\r\n\r\n".to_vec());
+        let error = get_bytes(&url, 1024).unwrap_err().to_string();
+        assert!(error.contains("exceeded 1024 bytes"), "{error}");
+    }
+
+    #[test]
+    fn streaming_cap_stops_a_chunked_flood() {
+        // No Content-Length: the streaming cap is the only bound. A chunked
+        // body far above the cap must stop reading at max_size + 1 bytes.
+        let mut response =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1000\r\n".to_vec();
+        response.extend(std::iter::repeat_n(b'x', 4096));
+        response.extend_from_slice(b"\r\n0\r\n\r\n");
+        let url = serve(response);
+        let error = get_bytes(&url, 1024).unwrap_err().to_string();
+        assert!(error.contains("exceeded 1024 bytes"), "{error}");
+    }
+
+    #[test]
+    fn small_responses_stream_unchanged() {
+        let url = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        assert_eq!(get_bytes(&url, 1024).unwrap(), b"{}");
     }
 }

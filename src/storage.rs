@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::process;
+use std::time::{Duration, SystemTime};
 
 use crate::current::RateSnapshot;
 use crate::style;
@@ -102,8 +103,24 @@ pub fn save_json<T: Serialize>(path: &Path, value: &T, atomic: bool) -> Result<(
     }
     let bytes = serde_json::to_vec_pretty(value)?;
     if atomic {
-        let temp = path.with_extension("json.tmp");
-        fs::write(&temp, bytes)?;
+        // Unique temp name: concurrent fxrate processes (cron + manual) must
+        // not clobber each other's temp file. fsync before the rename so a
+        // crash cannot leave a half-written cache under the final name.
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let temp = path.with_extension(format!(
+            "json.tmp.{}.{:?}.{}",
+            process::id(),
+            std::thread::current().id(),
+            nanos
+        ));
+        {
+            let mut file = fs::File::create(&temp)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+        }
         fs::rename(temp, path)?;
     } else {
         fs::write(path, bytes)?;
@@ -205,5 +222,29 @@ mod tests {
     #[test]
     fn duration_parser_rejects_out_of_range_values() {
         assert!(parse_duration("999999999999999999999h").is_none());
+    }
+
+    #[test]
+    fn atomic_saves_do_not_collide_or_leave_temp_files() {
+        let dir = std::env::temp_dir().join(format!("fxrate-save-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rates.json");
+        std::thread::scope(|scope| {
+            for n in 0..4u64 {
+                let path = path.clone();
+                scope.spawn(move || {
+                    save_json(&path, &serde_json::json!({ "n": n }), true).unwrap();
+                });
+            }
+        });
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved["n"].as_u64().is_some());
+        let residue: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(residue, vec!["rates.json".to_owned()]);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

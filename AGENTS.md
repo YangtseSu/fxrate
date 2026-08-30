@@ -61,8 +61,8 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 | History | `$XDG_DATA_HOME/fxrate/history.db`, then `$HOME/.local/share/fxrate/history.db`, otherwise `./fxrate/history.db` (SQLite: `historical_rates`, `history_coverage`) |
 
 - Config is auto-created with defaults on first run if missing
-- Cache is written atomically (temp file + rename) to avoid corruption
-- History is written through SQLite transactions (upsert, never delete+reinsert)
+- Cache is written atomically (uniquely named temp file, fsynced, then renamed) so corruption and concurrent fxrate processes cannot clobber it
+- History is written through SQLite transactions (upsert, never delete+reinsert); concurrent CLI runs serialize on rusqlite's default 5s busy timeout rather than failing with `database is locked`
 - Override both with the XDG env vars for isolated tests
 - The project was renamed from `huobi` to `fxrate` (crate, binary, usage text, and the XDG directory name, which is the single `storage::APP_DIR` constant).
   There is deliberately no migration code: the README tells users to move the old `huobi` config/data directories by hand, and a fresh install simply re-downloads
@@ -211,7 +211,7 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
 
 ## Testing notes
 
-- Run the full suite with `cargo test --locked` (module unit tests plus `tests/chart.rs` integration tests, which are fully offline: they seed `rates.json` / `history.db` into a fresh XDG home and block the network with `HTTPS_PROXY=http://127.0.0.1:9`)
+- Run the full suite with `cargo test --locked` (module unit tests plus `tests/chart.rs` integration tests, which are fully offline: they seed `rates.json` / `history.db` into a fresh XDG home and block the network with `HTTPS_PROXY=http://127.0.0.1:9`). The one exception is `current.rs`, whose unit tests serve canned HTTP responses on a random localhost port — they scrub proxy env vars first so a developer's `HTTP_PROXY` cannot redirect even localhost
 - Offline paths: seed a handcrafted `rates.json` (set `fetched_at` to a stale time), include the cached provider when testing provider switching, and block the network, e.g. `HTTPS_PROXY=http://127.0.0.1:9` — refresh fails and the cache fallback is exercised
 - Chart live tail: seed `rates.json` dated on/after the coverage end (e.g. a Saturday after a Friday) and assert the appended/replaced row equals the snapshot's `rate[target] / rate[source]`; a snapshot more than 4 days after the last ECB day (stale history) must not splice; a currency missing from the snapshot warns on stderr and the chart ends at the last ECB day; a weekend-only range with a snapshot prints the single-day row
 - Historical `--date` convert: a covered date reuses the cache with no network; an uncovered date tries a sync then exits 1 when no local history exists; a weekend/holiday date falls back to the previous business day (noted on stderr, rate date shown is that day); ECB EUR-based cross math matches `chart`
