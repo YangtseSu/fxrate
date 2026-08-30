@@ -98,6 +98,11 @@ fxrate [options] AMOUNT SOURCE [TARGET...]
 fxrate chart [options] SOURCE TARGET
 ```
 
+- Options may appear on either side of the `chart` subcommand and are parsed as one
+  stream (`fxrate -u chart USD CNY` forces the history re-download). An option's value
+  is never mistaken for the subcommand (`-p chart chart USD CNY` is a convert usage
+  error), and an option unknown to the selected command (e.g. `-d` before `chart`) is
+  a usage error (exit 2)
 - No targets → **multi-currency view** over the config `currencies` list, always shown regardless of `multi_view`
 - With targets: explicit targets are shown first (deduped, order preserved).
   When `multi_view` is enabled, the default list follows, separated by a rule line; when disabled, only the explicit targets are shown.

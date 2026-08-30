@@ -10,11 +10,13 @@ use crate::provider::Provider;
 use crate::render::Format;
 use crate::style;
 
+#[derive(Debug, PartialEq)]
 pub enum Command {
     Convert(ConvertArgs),
     Chart(ChartArgs),
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ConvertArgs {
     pub force: bool,
     pub provider: Option<String>,
@@ -24,6 +26,7 @@ pub struct ConvertArgs {
     pub date: Option<NaiveDate>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ChartArgs {
     pub force: bool,
     pub provider: Option<String>,
@@ -37,19 +40,49 @@ pub struct ChartArgs {
 
 pub fn parse_args() -> Result<Command, i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let first_positional = args.iter().position(|arg| !arg.starts_with('-'));
-    match first_positional {
-        Some(index) if args[index] == "chart" => parse_chart_args(&args[index + 1..]),
-        _ => parse_convert_args(&args),
+    dispatch(&args)
+}
+
+fn dispatch(args: &[String]) -> Result<Command, i32> {
+    match subcommand_index(args) {
+        Some(index) => parse_chart_args(args[..index].iter().chain(args[index + 1..].iter())),
+        None => parse_convert_args(args.iter()),
     }
 }
 
-fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
+// Index of the `chart` subcommand token, or None for a conversion. Option
+// values are skipped so `-p chart` is not mistaken for the subcommand; the
+// first free token other than `chart` starts convert operands. Unknown
+// options are left for the command parsers to reject.
+fn subcommand_index(args: &[String]) -> Option<usize> {
+    let mut iter = args.iter().enumerate();
+    while let Some((index, arg)) = iter.next() {
+        let arg = arg.as_str();
+        if !arg.starts_with('-') {
+            return (arg == "chart").then_some(index);
+        }
+        if option_takes_value(arg) {
+            iter.next();
+        }
+    }
+    None
+}
+
+// Options from either command whose next token is a value; only used to
+// locate the subcommand.
+fn option_takes_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "-p" | "--provider" | "-d" | "--date" | "--from" | "--to" | "--format" | "--output"
+    )
+}
+
+fn parse_convert_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Command, i32> {
     let mut force = false;
     let mut provider = None;
     let mut date = None;
     let mut positional = Vec::new();
-    let mut iter = args.iter();
+    let mut iter = args;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-u" | "--update" => force = true,
@@ -148,7 +181,7 @@ fn parse_date(value: &str) -> Result<NaiveDate, i32> {
     })
 }
 
-fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
+fn parse_chart_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Command, i32> {
     let mut force = false;
     let mut provider: Option<String> = None;
     let mut from = None;
@@ -156,7 +189,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
     let mut format = Format::Auto;
     let mut output = None;
     let mut positional = Vec::new();
-    let mut iter = args.iter();
+    let mut iter = args;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-u" | "--update" => force = true,
@@ -314,4 +347,91 @@ Options:
   -h, --help              show this help
   -V, --version           print version and exit 0"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| arg.to_string()).collect()
+    }
+
+    #[test]
+    fn chart_options_before_the_subcommand_are_parsed() {
+        let command = dispatch(&argv(&["-u", "chart", "usd", "cny"])).expect("parsed");
+        let Command::Chart(chart) = command else {
+            panic!("expected chart, got convert");
+        };
+        assert!(chart.force);
+        assert_eq!(chart.source, "USD");
+        assert_eq!(chart.target, "CNY");
+        assert_eq!(chart.provider, None);
+    }
+
+    #[test]
+    fn chart_options_on_both_sides_are_parsed_as_one_stream() {
+        let command = dispatch(&argv(&["-p", "ecb", "chart", "USD", "CNY", "-u"])).expect("parsed");
+        let Command::Chart(chart) = command else {
+            panic!("expected chart, got convert");
+        };
+        assert!(chart.force);
+        assert_eq!(chart.provider.as_deref(), Some("ecb"));
+    }
+
+    #[test]
+    fn convert_only_option_before_chart_is_a_usage_error() {
+        assert_eq!(
+            dispatch(&argv(&["-d", "2024-01-02", "chart", "USD", "CNY"])),
+            Err(2)
+        );
+    }
+
+    #[test]
+    fn invalid_provider_before_chart_is_a_usage_error() {
+        assert_eq!(
+            dispatch(&argv(&["-p", "frankfurter", "chart", "USD", "CNY"])),
+            Err(2)
+        );
+    }
+
+    #[test]
+    fn help_and_version_before_chart_exit_zero() {
+        assert_eq!(dispatch(&argv(&["--help", "chart"])), Err(0));
+        assert_eq!(dispatch(&argv(&["-V", "chart", "USD", "CNY"])), Err(0));
+    }
+
+    #[test]
+    fn option_values_are_never_taken_for_the_subcommand() {
+        assert_eq!(
+            subcommand_index(&argv(&["-u", "chart", "USD", "CNY"])),
+            Some(1)
+        );
+        assert_eq!(subcommand_index(&argv(&["chart"])), Some(0));
+        assert_eq!(subcommand_index(&argv(&[])), None);
+        // `-p` consumes "chart" as its value; the first free token is "USD".
+        assert_eq!(
+            subcommand_index(&argv(&["-p", "chart", "USD", "CNY"])),
+            None
+        );
+        assert_eq!(dispatch(&argv(&["-p", "chart", "USD", "CNY"])), Err(2));
+        // A convert amount before any subcommand starts the operands.
+        assert_eq!(subcommand_index(&argv(&["1.5", "chart"])), None);
+        // "--output chart" consumes the subcommand token as its value.
+        assert_eq!(
+            dispatch(&argv(&["--output", "chart", "USD", "CNY"])),
+            Err(2)
+        );
+    }
+
+    #[test]
+    fn convert_parsing_is_unchanged() {
+        let command = dispatch(&argv(&["-u", "1.5", "usd", "cny", "gbp"])).expect("parsed");
+        let Command::Convert(convert) = command else {
+            panic!("expected convert, got chart");
+        };
+        assert!(convert.force);
+        assert_eq!(convert.source, "USD");
+        assert_eq!(convert.targets, vec!["CNY", "GBP"]);
+    }
 }

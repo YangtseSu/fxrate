@@ -41,6 +41,9 @@ fxrate [options] AMOUNT SOURCE [TARGET...]
 fxrate chart [options] SOURCE TARGET
 ```
 
+Options may appear on either side of the `chart` subcommand
+(`fxrate -u chart USD CNY` forces the history re-download).
+
 ### convert
 
 Convert `AMOUNT` units of `SOURCE` into one or more `TARGET` currencies using
