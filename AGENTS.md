@@ -119,7 +119,7 @@ fxrate chart [options] SOURCE TARGET
   Invalid dates or `from > to` are usage errors (exit 2)
 - `--format <csv|json|text|auto>` — `auto` (default): text chart when stdout is a terminal (or when `--output` is given), CSV otherwise.
   `csv`/`json` emit text (`date,rate` rows / `{source, target, points}`); `text` emits the text chart
-- `--output <path>` — write the chart to a file instead of stdout (never emits terminal escape sequences); with `auto` the file gets the text chart
+- `--output <path>` — write the chart to a file instead of stdout for every `--format` (`auto`/`text` get the text chart, `csv`/`json` their payload; the file never contains terminal escape sequences)
 - `-p`, `--provider <name>` — `ecb` only (default); anything else is a usage error (exit 2)
 - Single trading day (ECB or the live tail) → prints `1 SOURCE = x TARGET (date)` instead of a chart; an empty range with neither ECB data nor a live point (e.g. a weekend with no rates cache) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
 - Terminal charts: a stats panel above a textplots braille chart.

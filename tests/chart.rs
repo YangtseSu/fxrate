@@ -308,6 +308,78 @@ fn chart_writes_text_file() {
 }
 
 #[test]
+fn chart_writes_csv_file() {
+    let home = temp_home("csvfile");
+    seed_history(&home, "ecb");
+    let target = home.join("chart.csv");
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2025-01-02",
+            "--to",
+            "2025-01-06",
+            "--format",
+            "csv",
+            "--output",
+            target.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = std::fs::read_to_string(&target).unwrap();
+    assert!(text.starts_with("date,rate\n"));
+    assert!(text.contains("2025-01-02,"));
+    assert!(text.contains("2025-01-06,"));
+    // File output must never carry terminal escape sequences.
+    assert!(!text.contains('\u{1b}'));
+    // The payload goes to the file instead of stdout.
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn chart_writes_json_file() {
+    let home = temp_home("jsonfile");
+    seed_history(&home, "ecb");
+    let target = home.join("chart.json");
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2025-01-02",
+            "--to",
+            "2025-01-06",
+            "--format",
+            "json",
+            "--output",
+            target.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap())
+        .expect("json output should parse");
+    assert_eq!(json["source"], "USD");
+    assert_eq!(json["target"], "CNY");
+    assert_eq!(json["points"].as_array().unwrap().len(), 3);
+    assert_eq!(json["points"][0]["date"], "2025-01-02");
+    // The payload goes to the file instead of stdout.
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
 fn chart_text_format_renders_braille_chart() {
     let home = temp_home("text");
     seed_history(&home, "ecb");

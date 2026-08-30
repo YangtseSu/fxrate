@@ -576,11 +576,11 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
         other => other,
     };
 
-    match resolved {
-        Format::Csv => print!("{}", render::render_csv(&points)),
-        Format::Json => println!("{}", render::render_json(&points, &source, &target)),
+    let payload = match resolved {
+        Format::Csv => render::render_csv(&points),
+        Format::Json => format!("{}\n", render::render_json(&points, &source, &target)),
         Format::Text => {
-            let text = if points.len() == 1 {
+            if points.len() == 1 {
                 let (date, rate) = points[0];
                 format!(
                     "1 {source} = {} {target} ({date})\n",
@@ -592,17 +592,17 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
                 // stay plain, and NO_COLOR turns them off.
                 let color = output.is_none() && style::stdout_color();
                 render::render_text(&points, &source, &target, cols as usize, rows as u32, color)
-            };
-            match output {
-                Some(path) => {
-                    fs::write(&path, text).map_err(|error| {
-                        boxed_error(format!("failed to write {}: {error}", path.display()))
-                    })?;
-                }
-                None => print!("{text}"),
             }
         }
         Format::Auto => unreachable!("auto resolved above"),
+    };
+    match output {
+        Some(path) => {
+            fs::write(&path, payload).map_err(|error| {
+                boxed_error(format!("failed to write {}: {error}", path.display()))
+            })?;
+        }
+        None => print!("{payload}"),
     }
     Ok(())
 }
