@@ -129,10 +129,12 @@ fxrate chart [options] SOURCE TARGET
   `csv`/`json` emit text (`date,rate` rows / `{source, target, points}`); `text` emits the text chart
 - `--output <path>` — write the chart to a file instead of stdout for every `--format` (`auto`/`text` get the text chart, `csv`/`json` their payload; the file never contains terminal escape sequences)
 - `-p`, `--provider <name>` — `ecb` only (default); anything else is a usage error (exit 2)
-- Single trading day (ECB or the live tail) → prints `1 SOURCE = x TARGET (date)` instead of a chart; an empty range with neither ECB data nor a live point (e.g. a weekend with no rates cache) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
+- Single trading day (ECB or the live tail) → prints `1 SOURCE = x TARGET (date)` instead of a chart, with `, live` after the date when that day comes from the rates snapshot; an empty range with neither ECB data nor a live point (e.g. a weekend with no rates cache) is a runtime error (exit 1); a currency with no available history in the requested range is a runtime error (exit 1)
 - Terminal charts: a stats panel above a textplots braille chart.
   The panel is a Unicode box titled `SOURCE/TARGET Trend` with Current (with its date),
-  High/Low (each with the extreme's date), signed Change (🟢 green up / 🔴 red down, neutral `±0.00%`),
+  High/Low (each with the extreme's date) — a stat whose date is the live-tail point
+  carries a `, live` annotation so snapshot-sourced points are not mistaken for ECB fixings —
+  signed Change (🟢 green up / 🔴 red down, neutral `±0.00%`),
   Average, and Volatility `(high − low) / average`; two stat columns when the box fits the
   terminal width, one stat per line otherwise. The chart has a default canvas of 80
   columns × 15 braille rows (the whole output is 22 lines: panel + chart + two

@@ -799,6 +799,17 @@ fn chart_default_range_extends_to_live_saturday() {
     );
     // The ECB day before the live tail keeps its own value (7.68 / 1.05).
     assert!(stdout.contains("2025-01-10,7.314285714285714"), "{stdout}");
+    // The text chart marks the spliced point: the snapshot rate 7.3585
+    // jumps above every ECB fixing, so Current and High carry ", live".
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "text"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("Current: 7.358 (2025-01-11, live)"),
+        "live point must be annotated: {text}"
+    );
+    assert!(text.contains("High: 7.358 (2025-01-11, live)"), "{text}");
+    assert!(text.contains("Low: 7.299 (2025-01-02)"), "{text}");
     // Default range, covered history: no sync, no warnings.
     assert!(
         !String::from_utf8_lossy(&out.stderr).contains("warning"),
@@ -898,6 +909,26 @@ fn chart_single_live_day_prints_one_row() {
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         "date,rate\n2025-01-11,7.3584905660377355\n"
+    );
+    // The single-day text form marks the snapshot-sourced rate too.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2025-01-11",
+            "--to",
+            "2025-01-11",
+            "--format",
+            "text",
+        ],
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "1 USD = 7.358 CNY (2025-01-11, live)\n"
     );
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("using cached data"),

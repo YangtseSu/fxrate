@@ -619,6 +619,9 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
             points.push((live_date, live_rate));
         }
     }
+    // The spliced point comes from the rates snapshot, not ECB fixings; the
+    // text renderings annotate it so a snapshot-driven jump reads as such.
+    let live_date = live_splice.map(|(date, _)| date);
     if points.is_empty() {
         return Err(boxed_error(format!(
             "no overlapping data for {source} and {target} between {from} and {to}"
@@ -639,8 +642,13 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
         Format::Text => {
             if points.len() == 1 {
                 let (date, rate) = points[0];
+                let live_note = if live_date == Some(date) {
+                    ", live"
+                } else {
+                    ""
+                };
                 format!(
-                    "1 {source} = {} {target} ({date})\n",
+                    "1 {source} = {} {target} ({date}{live_note})\n",
                     render::fmt_value(rate)
                 )
             } else {
@@ -648,7 +656,15 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
                 // Colors only on an interactive terminal; files and pipes
                 // stay plain, and NO_COLOR turns them off.
                 let color = output.is_none() && style::stdout_color();
-                render::render_text(&points, &source, &target, cols as usize, rows as u32, color)
+                render::render_text(
+                    &points,
+                    &source,
+                    &target,
+                    cols as usize,
+                    rows as u32,
+                    color,
+                    live_date,
+                )
             }
         }
         Format::Auto => unreachable!("auto resolved above"),

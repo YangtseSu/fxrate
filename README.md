@@ -134,13 +134,16 @@ the range reaches the live snapshot's date — within 5 days of the last ECB
 day (the longest ECB publish gap: two consecutive holidays plus a weekend,
 e.g. Easter) — that day's point comes from `rates.json`
 (the same EUR-based cross math the convert command uses), so the chart's
-right edge matches `fxrate` convert; the default range extends to it. A
-snapshot dated further back, or a currency missing from it, leaves the chart
-purely ECB. The chart never fetches live rates — it reads the cached
-`rates.json` as-is (run the convert command to refresh it). A single trading
-day (ECB or the live tail) prints `1 SOURCE = x TARGET (date)` instead of a
-chart; an empty range with neither ECB data nor a live point (e.g. a weekend
-with no rates cache) is a runtime error (exit 1).
+right edge matches `fxrate` convert; the default range extends to it. That
+snapshot-sourced point is marked `, live` in the stats panel and in the
+single-day line, so a jump caused by the live rate is not mistaken for an
+ECB fixing. A snapshot dated further back, or a currency missing from it,
+leaves the chart purely ECB. The chart never fetches live rates — it reads
+the cached `rates.json` as-is (run the convert command to refresh it). A
+single trading day (ECB or the live tail) prints
+`1 SOURCE = x TARGET (date)` — with `, live` when that day comes from the
+snapshot — instead of a chart; an empty range with neither ECB data nor a
+live point (e.g. a weekend with no rates cache) is a runtime error (exit 1).
 
 Output shows the converted amounts and the rates date. Currencies without
 rate data are reported on stderr and skipped; valid conversions still print.

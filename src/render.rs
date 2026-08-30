@@ -231,17 +231,26 @@ fn border_rule(left: char, right: char, title: &str, inner_w: usize, color: bool
 
 /// Render the stats box shown above the chart: current value (with its date),
 /// high/low with the extreme dates, the signed (green/red) range change, the
-/// average, and the amplitude `(high - low) / average`. Two stat columns when
-/// they fit in `cols`, one stat per line otherwise. Returns the box without a
-/// trailing newline plus its line count.
+/// average, and the amplitude `(high - low) / average`. A stat whose date is
+/// `live_date` — the point spliced in from the rates snapshot — is annotated
+/// `, live` so a snapshot-sourced jump is not mistaken for ECB data. Two stat
+/// columns when they fit in `cols`, one stat per line otherwise. Returns the
+/// box without a trailing newline plus its line count.
 fn stats_panel(
     stats: &Stats,
     source: &str,
     target: &str,
     cols: usize,
     color: bool,
+    live_date: Option<NaiveDate>,
 ) -> (String, usize) {
-    let at = |rate: f64, date: NaiveDate| format!("{} ({})", fmt_value(rate), date);
+    let at = |rate: f64, date: NaiveDate| {
+        if Some(date) == live_date {
+            format!("{} ({}, live)", fmt_value(rate), date)
+        } else {
+            format!("{} ({})", fmt_value(rate), date)
+        }
+    };
     let change = if stats.change_pct > 0.0 {
         StatCell {
             label: "Change",
@@ -617,7 +626,8 @@ const Y_LABEL_W: usize = 9;
 /// or every few days depending on the range); the y axis shows the cross rate
 /// with dense ticks at round values. `color` emits the ANSI bright-black
 /// chrome, the bright-cyan plotted line, and the green/red change; callers
-/// writing to a file or a pipe must pass `false`.
+/// writing to a file or a pipe must pass `false`. `live_date`, when given,
+/// annotates that snapshot-sourced point with `, live` in the stats panel.
 pub fn render_text(
     points: &[Point],
     source: &str,
@@ -625,6 +635,7 @@ pub fn render_text(
     cols: usize,
     rows: u32,
     color: bool,
+    live_date: Option<NaiveDate>,
 ) -> String {
     // Braille cells overplot and smear the line ("ghosting") once the series
     // is denser than the canvas. Beyond 200 points, downsample with LTTB,
@@ -634,7 +645,7 @@ pub fn render_text(
 
     let stats = series_stats(points).expect("render_text requires a non-empty series");
     let chart_cols = CHART_COLS.min(cols.saturating_sub(Y_LABEL_W)).max(16);
-    let (panel, panel_rows) = stats_panel(&stats, source, target, chart_cols, color);
+    let (panel, panel_rows) = stats_panel(&stats, source, target, chart_cols, color, live_date);
     // Terminals too short for the full output (panel + 15 braille rows + two
     // axis-label lines: 22 rows with the standard panel) get a compact chart
     // without axis labels; when even that cannot fit, a one-line sparkline.
@@ -797,7 +808,7 @@ mod tests {
             (date("2025-01-06"), 8.0),
             (date("2025-01-07"), 7.2),
         ];
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         assert!(text.starts_with("╭"));
         assert!(text.contains("USD/CNY Trend"));
         assert!(text.contains("Current: 7.2 (2025-01-07)"));
@@ -819,7 +830,7 @@ mod tests {
     #[test]
     fn text_chart_handles_flat_series() {
         let points = vec![(date("2025-01-02"), 7.3), (date("2025-01-03"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         // The axis snaps to a nice ladder around the flat value: 6.4..7.8
         // in 0.2 steps, with the padded range 7.3 ± 5% inside it.
         assert!(text.contains("7.6"));
@@ -829,7 +840,7 @@ mod tests {
     #[test]
     fn text_chart_handles_single_point() {
         let points = vec![(date("2025-01-02"), 7.3)];
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         // The x range is widened around the single point.
         assert!(text.contains("2025-01-01"));
         assert!(text.contains("2025-01-03"));
@@ -847,7 +858,7 @@ mod tests {
                 )
             })
             .collect();
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         let lines: Vec<&str> = text.lines().collect();
         let (marks, labels) = (lines[lines.len() - 2], lines[lines.len() - 1]);
         // Month-start ticks inside the range, thinned to 12-column spacing;
@@ -879,7 +890,7 @@ mod tests {
             (date("2025-01-03"), 7.5),
             (date("2025-01-06"), 6.8),
         ];
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         let panel: Vec<&str> = text.lines().take(5).collect();
         let width = display_width(panel[0]);
         assert!(panel.iter().all(|line| display_width(line) == width));
@@ -893,7 +904,7 @@ mod tests {
         let points: Vec<Point> = (0..60)
             .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.01))
             .collect();
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         let lines: Vec<&str> = text.lines().collect();
         // panel + 15 braille rows + tick marks + labels
         assert_eq!(lines.len(), 22);
@@ -911,14 +922,14 @@ mod tests {
             .map(|i| (base + chrono::Duration::days(i), 7.0 + i as f64 * 0.01))
             .collect();
         // 21 rows: panel (5) + 9 braille rows + the ymin label line; no x axis
-        let small = render_text(&points, "USD", "CNY", 80, 21, false);
+        let small = render_text(&points, "USD", "CNY", 80, 21, false, None);
         let lines: Vec<&str> = small.lines().collect();
         assert_eq!(lines.len(), 14);
         assert!(has_braille(&small));
         assert!(!lines[5..].iter().any(|line| line.contains('+')));
         assert!(lines[0].contains("USD/CNY Trend"));
         // 8 rows: even the compact chart cannot fit -> one-line sparkline
-        let tiny = render_text(&points, "USD", "CNY", 80, 8, false);
+        let tiny = render_text(&points, "USD", "CNY", 80, 8, false, None);
         let lines: Vec<&str> = tiny.lines().collect();
         assert_eq!(lines.len(), 6);
         assert!(!has_braille(&tiny));
@@ -927,11 +938,11 @@ mod tests {
             .chars()
             .all(|c| ('\u{2581}'..='\u{2588}').contains(&c)));
         // 23 rows is still too short (panel + 15 + 2 axis lines + 2 spare)
-        let tight = render_text(&points, "USD", "CNY", 80, 23, false);
+        let tight = render_text(&points, "USD", "CNY", 80, 23, false, None);
         assert_eq!(tight.lines().count(), 14);
         assert!(has_braille(&tight));
         // 24 rows keeps the full chart
-        let full = render_text(&points, "USD", "CNY", 80, 24, false);
+        let full = render_text(&points, "USD", "CNY", 80, 24, false, None);
         assert_eq!(full.lines().count(), 22);
         assert!(has_braille(&full));
     }
@@ -956,12 +967,12 @@ mod tests {
     #[test]
     fn color_dims_chrome_and_tints_change() {
         let down = vec![(date("2025-01-02"), 7.5), (date("2025-01-03"), 7.0)];
-        let text = render_text(&down, "USD", "CNY", 80, 24, true);
+        let text = render_text(&down, "USD", "CNY", 80, 24, true, None);
         assert!(text.contains("\u{1b}[90m")); // borders and axes are bright black
         assert!(text.contains("\u{1b}[96m")); // the plotted line is bright cyan
         let up = vec![(date("2025-01-02"), 7.0), (date("2025-01-03"), 7.2)];
-        assert!(render_text(&up, "USD", "CNY", 80, 24, true).contains("\u{1b}[32m🟢 +2.86%"));
-        assert!(!render_text(&up, "USD", "CNY", 80, 24, false).contains('\u{1b}'));
+        assert!(render_text(&up, "USD", "CNY", 80, 24, true, None).contains("\u{1b}[32m🟢 +2.86%"));
+        assert!(!render_text(&up, "USD", "CNY", 80, 24, false, None).contains('\u{1b}'));
     }
 
     #[test]
@@ -1004,7 +1015,7 @@ mod tests {
             let rate = 7.0 + ((i % 9) as f64) * 0.13;
             points.push((d, rate));
         }
-        let text = render_text(&points, "USD", "CNY", 80, 24, false);
+        let text = render_text(&points, "USD", "CNY", 80, 24, false, None);
         assert!(text.starts_with("╭"));
         assert!(has_braille(&text));
         // Endpoints remain in the frame after downsampling.
