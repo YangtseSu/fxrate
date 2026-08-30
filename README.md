@@ -70,6 +70,7 @@ Options:
   is a runtime error (exit 1). The `-p/--provider` selection is ignored
   (historical rates are always ECB). An invalid date is a usage error (exit 2)
 - `-h`, `--help` — show the convert usage and exit 0
+- `-V`, `--version` — print the version and exit 0
 
 ### chart
 
@@ -85,11 +86,15 @@ Positional arguments:
 Options:
 
 - `--from <date>` — inclusive start date, `YYYY-MM-DD`. Default: earliest
-  available data
+  available data. A date before the covered history is clamped to it with
+  a stderr note; a date after the last available day is a runtime error
+  (exit 1) unless the live snapshot can serve the day
 - `--to <date>` — inclusive end date, `YYYY-MM-DD`. Default: latest available
   data (the last ECB day, extended to the live snapshot date under the
   live-tail rule). Must not be earlier than `--from` (otherwise a usage
-  error, exit 2)
+  error, exit 2). A date before the covered history is a runtime error
+  (exit 1); a date after the last ECB day is clamped down with a stderr
+  note, and the live tail can still extend the chart from there
 - `--format <format>` — `csv`, `json`, `text`, or `auto` (default). `auto`
   emits a text chart on a TTY (or when `--output` is given) and CSV otherwise
 - `--output <path>` — write the chart to a file instead of stdout; with
@@ -98,6 +103,7 @@ Options:
   accepted. Anything else is a usage error (exit 2)
 - `-u`, `--update` — force re-download of the ECB full history
 - `-h`, `--help` — show the chart usage and exit 0
+- `-V`, `--version` — print the version and exit 0
 
 Examples:
 
@@ -156,7 +162,8 @@ Config file: `$XDG_CONFIG_HOME/fxrate/config.json` (default
 }
 ```
 
-- `update_interval`: duration string such as `24h` or `1h30m` (default `24h`)
+- `update_interval`: duration string in Go style, e.g. `24h`, `90m`, or
+  `1h30m` (units: `ns`, `us`, `ms`, `s`, `m`, `h`; default `24h`)
 - `provider`: rates source, `frankfurter` (default) or `exchange-api`. Invalid
   values warn and fall back to `frankfurter`; the CLI `-p` / `--provider`
   overrides the config value. Changing provider triggers an immediate refresh
