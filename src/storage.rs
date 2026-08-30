@@ -180,7 +180,9 @@ pub fn save_rates(snapshot: &RateSnapshot) -> Result<(), Box<dyn Error>> {
     save_json(&data_path(), snapshot, true)
 }
 
-/// Parse a Go-style duration such as `24h` or `1h30m` into a [`Duration`].
+/// Parse a duration such as `24h`, `7d`, or `1h30m` into a [`Duration`].
+/// Units follow Go's style with an added day unit: `ns`, `us`/`µs`, `ms`,
+/// `s`, `m`, `h`, `d`.
 pub fn parse_duration(value: &str) -> Option<Duration> {
     let mut total = 0.0_f64;
     let mut rest = value;
@@ -195,7 +197,7 @@ pub fn parse_duration(value: &str) -> Option<Duration> {
         }
         let number: f64 = rest[..digit_count].parse().ok()?;
         rest = &rest[digit_count..];
-        let units = ["ns", "us", "µs", "ms", "s", "m", "h"];
+        let units = ["ns", "us", "µs", "ms", "s", "m", "h", "d"];
         let unit = units.iter().find(|unit| rest.starts_with(**unit))?;
         let multiplier = match *unit {
             "ns" => 1e-9,
@@ -204,6 +206,7 @@ pub fn parse_duration(value: &str) -> Option<Duration> {
             "s" => 1.0,
             "m" => 60.0,
             "h" => 3600.0,
+            "d" => 86400.0,
             _ => unreachable!(),
         };
         total += number * multiplier;
@@ -224,6 +227,8 @@ mod tests {
     fn duration_parser_supports_compound_go_durations() {
         assert_eq!(parse_duration("1h30m"), Some(Duration::from_secs(5400)));
         assert_eq!(parse_duration("24h"), Some(Duration::from_secs(86400)));
+        assert_eq!(parse_duration("7d"), Some(Duration::from_secs(604800)));
+        assert_eq!(parse_duration("1d12h"), Some(Duration::from_secs(129600)));
         assert_eq!(parse_duration("0s"), None);
         assert_eq!(parse_duration("tomorrow"), None);
     }

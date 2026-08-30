@@ -162,8 +162,8 @@ Config file: `$XDG_CONFIG_HOME/fxrate/config.json` (default
 }
 ```
 
-- `update_interval`: duration string in Go style, e.g. `24h`, `90m`, or
-  `1h30m` (units: `ns`, `us`, `ms`, `s`, `m`, `h`; default `24h`)
+- `update_interval`: duration string such as `24h`, `90m`, `1h30m`, or `7d`
+  (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`; default `24h`)
 - `provider`: rates source, `frankfurter` (default) or `exchange-api`. Invalid
   values warn and fall back to `frankfurter`; the CLI `-p` / `--provider`
   overrides the config value. Changing provider triggers an immediate refresh
