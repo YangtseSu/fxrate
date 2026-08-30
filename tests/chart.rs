@@ -50,11 +50,10 @@ const SCHEMA: &str = "CREATE TABLE historical_rates (
 CREATE INDEX historical_rates_lookup
     ON historical_rates(provider, quote, date);
 CREATE TABLE history_coverage (
-    provider   TEXT NOT NULL,
+    provider   TEXT PRIMARY KEY,
     start_date TEXT NOT NULL,
     end_date   TEXT NOT NULL,
-    fetched_at TEXT NOT NULL,
-    PRIMARY KEY (provider, start_date, end_date)
+    fetched_at TEXT NOT NULL
 );";
 
 /// Seed a covered 2025-01-02..2025-01-06 window for USD/CNY.

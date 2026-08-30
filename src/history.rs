@@ -37,12 +37,12 @@ pub fn open_history_db() -> Result<Connection, Box<dyn Error>> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(&path)?;
-    create_schema(&conn)?;
+    let mut conn = Connection::open(&path)?;
+    create_schema(&mut conn)?;
     Ok(conn)
 }
 
-fn create_schema(conn: &Connection) -> Result<(), Box<dyn Error>> {
+fn create_schema(conn: &mut Connection) -> Result<(), Box<dyn Error>> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS historical_rates (
             provider   TEXT NOT NULL,
@@ -55,13 +55,71 @@ fn create_schema(conn: &Connection) -> Result<(), Box<dyn Error>> {
         CREATE INDEX IF NOT EXISTS historical_rates_lookup
             ON historical_rates(provider, quote, date);
         CREATE TABLE IF NOT EXISTS history_coverage (
-            provider   TEXT NOT NULL,
+            provider   TEXT PRIMARY KEY,
             start_date TEXT NOT NULL,
             end_date   TEXT NOT NULL,
-            fetched_at TEXT NOT NULL,
-            PRIMARY KEY (provider, start_date, end_date)
+            fetched_at TEXT NOT NULL
         );",
     )?;
+    migrate_history_coverage(conn)
+}
+
+/// True when `history_coverage` still has the legacy multi-row schema (a
+/// primary key spanning provider, start, and end) instead of one row per
+/// provider.
+fn legacy_coverage_schema(conn: &Connection) -> Result<bool, Box<dyn Error>> {
+    let mut stmt = conn.prepare("PRAGMA table_info(history_coverage)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        let pk: i64 = row.get(5)?;
+        if (name == "start_date" || name == "end_date") && pk != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Fold a legacy multi-row `history_coverage` table into the single row per
+/// provider. Full-history syncs keep at most one range per provider, so real
+/// databases fold to the row they already have; the min/max envelope only
+/// matters for hand-built databases with disjoint rows.
+fn migrate_history_coverage(conn: &mut Connection) -> Result<(), Box<dyn Error>> {
+    if !legacy_coverage_schema(conn)? {
+        return Ok(());
+    }
+    let folded: Vec<(String, String, String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT provider, MIN(start_date), MAX(end_date), MAX(fetched_at)
+             FROM history_coverage GROUP BY provider",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut folded = Vec::new();
+        while let Some(row) = rows.next()? {
+            folded.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?));
+        }
+        folded
+    };
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "DROP TABLE history_coverage;
+         CREATE TABLE history_coverage (
+             provider   TEXT PRIMARY KEY,
+             start_date TEXT NOT NULL,
+             end_date   TEXT NOT NULL,
+             fetched_at TEXT NOT NULL
+         );",
+    )?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO history_coverage (provider, start_date, end_date, fetched_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for (provider, start, end, fetched_at) in &folded {
+            stmt.execute(params![provider, start, end, fetched_at])?;
+        }
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -227,7 +285,9 @@ fn import_ecb_history(
     Ok((start, end))
 }
 
-/// Record the synced `[start, end]` range and prune older rows it covers.
+/// Record the synced `[start, end]` range for the provider. Every sync
+/// imports the full history, so the new range subsumes the previous one and
+/// the table holds exactly one row per provider.
 fn upsert_coverage(
     conn: &Connection,
     provider: Provider,
@@ -238,8 +298,10 @@ fn upsert_coverage(
     conn.execute(
         "INSERT INTO history_coverage (provider, start_date, end_date, fetched_at)
          VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(provider, start_date, end_date)
-         DO UPDATE SET fetched_at = excluded.fetched_at",
+         ON CONFLICT(provider) DO UPDATE SET
+            start_date = excluded.start_date,
+            end_date = excluded.end_date,
+            fetched_at = excluded.fetched_at",
         params![
             provider.name(),
             start.to_string(),
@@ -247,20 +309,10 @@ fn upsert_coverage(
             fetched_at
         ],
     )?;
-    // Each sync downloads the full history, so successive syncs only advance
-    // `end_date` and the conflict key rarely hits: without pruning, the table
-    // would grow one stale row per sync. Rows sticking out on either side of
-    // the new range are kept.
-    conn.execute(
-        "DELETE FROM history_coverage
-         WHERE provider = ?1 AND start_date >= ?2 AND end_date <= ?3
-           AND NOT (start_date = ?2 AND end_date = ?3)",
-        params![provider.name(), start.to_string(), end.to_string()],
-    )?;
     Ok(())
 }
 
-/// True when at least one recorded coverage row covers `[from, to]`.
+/// True when the recorded coverage range for the provider covers `[from, to]`.
 pub fn coverage_covers(
     conn: &Connection,
     provider: Provider,
@@ -275,16 +327,14 @@ pub fn coverage_covers(
     Ok(stmt.exists(params![provider.name(), from.to_string(), to.to_string()])?)
 }
 
-/// The widest recorded coverage range for the provider, if any.
+/// The recorded coverage range for the provider, if any.
 pub fn coverage_range(
     conn: &Connection,
     provider: Provider,
 ) -> Result<Option<Coverage>, Box<dyn Error>> {
     let mut stmt = conn.prepare(
         "SELECT start_date, end_date FROM history_coverage
-         WHERE provider = ?1
-         ORDER BY (julianday(end_date) - julianday(start_date)) DESC
-         LIMIT 1",
+         WHERE provider = ?1",
     )?;
     let mut rows = stmt.query(params![provider.name()])?;
     let Some(row) = rows.next()? else {
@@ -417,8 +467,8 @@ mod tests {
     }
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        create_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_schema(&mut conn).unwrap();
         conn
     }
 
@@ -600,8 +650,8 @@ mod tests {
             !coverage_covers(&conn, Provider::Ecb, date("2025-01-02"), date("2025-04-01")).unwrap()
         );
 
-        // A newer, wider sync subsumes the previous row: lookups use the wide
-        // range and the stale narrower row is pruned.
+        // A newer, wider sync replaces the row: the table holds exactly one
+        // range per provider.
         upsert_coverage(
             &conn,
             Provider::Ecb,
@@ -623,7 +673,8 @@ mod tests {
         assert_eq!(coverage.end, date("2025-04-30"));
         assert_eq!(row_count(&conn), 1);
 
-        // A row the new range does not cover is kept.
+        // A later, disjoint write replaces the row rather than coexisting:
+        // coverage is the latest synced range, never a union of stale ones.
         upsert_coverage(
             &conn,
             Provider::Ecb,
@@ -632,8 +683,40 @@ mod tests {
             "now",
         )
         .unwrap();
-        assert_eq!(row_count(&conn), 2);
+        let coverage = coverage_range(&conn, Provider::Ecb).unwrap().unwrap();
+        assert_eq!(coverage.start, date("2020-01-02"));
+        assert_eq!(coverage.end, date("2020-12-31"));
+        assert_eq!(row_count(&conn), 1);
     }
+
+    #[test]
+    fn legacy_coverage_rows_are_folded_into_one() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE history_coverage (
+                provider   TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date   TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (provider, start_date, end_date)
+            );
+            INSERT INTO history_coverage VALUES
+                ('ecb', '2020-01-02', '2020-12-31', 'old'),
+                ('ecb', '2024-12-02', '2025-04-30', 'new');",
+        )
+        .unwrap();
+        create_schema(&mut conn).unwrap();
+        let coverage = coverage_range(&conn, Provider::Ecb).unwrap().unwrap();
+        assert_eq!(coverage.start, date("2020-01-02"));
+        assert_eq!(coverage.end, date("2025-04-30"));
+        let row_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM history_coverage", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(row_count, 1);
+    }
+
     #[test]
     fn rate_on_date_returns_stored_value_or_none() {
         let conn = in_memory_db();

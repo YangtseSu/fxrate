@@ -46,7 +46,7 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
   before the last ECB day or a currency missing from the snapshot (warned on stderr) also disables the tail.
   The chart never fetches live rates: it reads `rates.json` as-is (refresh it by running the convert command).
 - On first chart use (or when the requested `--from`/`--to` range is not covered, or with `-u/--update`) the full CSV is downloaded and upserted in a transaction (sync/fallback/error policy is under **Behavior**)
-- `history_coverage` records successfully synced ranges so weekend-only ranges are not mistaken for missing downloads; no weekend/holiday data is fabricated and no interpolation is done
+- `history_coverage` holds one synced range per provider (`provider` is the primary key; a legacy multi-row table is folded into it on open) so weekend-only ranges are not mistaken for missing downloads; no weekend/holiday data is fabricated and no interpolation is done
 - Chart points are the per-date intersection of both currencies (both must have data that day), computed as `EUR→target / EUR→source`; EUR is a unity series over the trading-date universe
 - `date` = the rates' business date from the API; `fetched_at` = local fetch time; both are stored in the cache
 - The cache records the provider that produced it.
