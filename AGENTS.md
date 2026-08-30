@@ -207,6 +207,11 @@ Note: `gh` reads `$XDG_CONFIG_HOME` — do not run it with a test home's XDG var
 
 5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum check), then a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
 6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
+7. Optionally publish the Arch package on the release. Build it with baseline CFLAGS — CachyOS's `/etc/makepkg.conf` sets `-march=native`, which would pin the package to the maintainer's CPU (copy the config and replace `-march=native` with `-march=x86-64`; CachyOS also enables the `debug` option, whose `fxrate-debug` split package is not published):
+   `makepkg --config makepkg-baseline.conf` in a scratch dir holding a copy of `packaging/arch/PKGBUILD` (keep the repo dir clean of `src/`/`pkg/` build artifacts)
+   Then upload and refresh `checksums.txt` so it covers every asset (run `gh` with `-R YangtseSu/fxrate` outside a git checkout):
+   `gh release upload -R YangtseSu/fxrate v0.5.2 fxrate-0.5.2-1-x86_64.pkg.tar.zst --clobber`, then re-download all assets, drop the old `checksums.txt`, regenerate it with `sha256sum -- *`, and upload it with `--clobber`.
+   The aarch64 package cannot be built on the x86_64 workstation; it is currently release-only-absent (the CI attempt failed: `archlinux:base-devel` on Docker Hub ships no arm64 manifest).
 
 The PKGBUILD lives at `packaging/arch/` on main, never in the tagged tree.
 Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
