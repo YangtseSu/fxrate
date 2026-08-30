@@ -1,0 +1,78 @@
+name: Arch package
+
+# The PKGBUILD bump commit ("packaging: bump PKGBUILD to vX.Y.Z") is the
+# point where pkgver and the tarball sha256 are both final, so it — not the
+# tag — triggers the package build. The tag flow's release.yml cannot build
+# the package: at tag time the PKGBUILD on main still names the old version.
+on:
+  push:
+    branches: [main]
+    paths: ['packaging/arch/PKGBUILD']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    steps:
+      - name: Install build dependencies
+        # base-devel has makepkg and a C toolchain but no git; the PKGBUILD's
+        # makedepends=('rust') is installed by hand because makepkg does not
+        # auto-sync as the unprivileged build user.
+        run: pacman -Syu --noconfirm git rust
+
+      - uses: actions/checkout@v7
+
+      - name: Build package
+        # makepkg refuses to run as root; vanilla Arch makepkg.conf keeps the
+        # CFLAGS at baseline x86-64 (no -march=native drift).
+        run: |
+          useradd -m -s /bin/bash build
+          chown -R build:build "$GITHUB_WORKSPACE"
+          su -l build -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg -f --noconfirm"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arch-package-${{ matrix.arch }}
+          path: packaging/arch/*.pkg.tar.zst
+          if-no-files-found: error
+
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PKGVER=$(grep -oP '^pkgver=\K.*' packaging/arch/PKGBUILD)
+          TAG="v$PKGVER"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG does not exist; nothing to upload"
+            exit 0
+          fi
+          gh release upload "$TAG" dist/*.pkg.tar.zst --clobber
+          # Regenerate checksums.txt over every asset so the packages are
+          # covered too, not just the release.yml binaries.
+          gh release download "$TAG" -D dist/assets
+          rm -f dist/assets/checksums.txt
+          (cd dist/assets && sha256sum -- * > "$GITHUB_WORKSPACE/checksums.txt")
+          gh release upload "$TAG" checksums.txt --clobber

@@ -207,6 +207,7 @@ Note: `gh` reads `$XDG_CONFIG_HOME` — do not run it with a test home's XDG var
 
 5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum check), then a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
 6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
+7. The PKGBUILD bump push (or a manual `gh workflow run arch-package.yml`) triggers `.github/workflows/arch-package.yml`: it builds x86_64/aarch64 packages in `archlinux:base-devel` containers (the aarch64 leg on a free `ubuntu-24.04-arm` runner), attaches them to the `v$pkgver` release, and regenerates `checksums.txt` to cover every asset. The packages are built against current Arch and target up-to-date Arch systems only; if the release does not exist the upload is skipped.
 
 The PKGBUILD lives at `packaging/arch/` on main, never in the tagged tree.
 Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
