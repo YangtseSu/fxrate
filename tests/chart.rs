@@ -991,7 +991,7 @@ fn chart_from_after_coverage_errors_with_coverage_context() {
     seed_history(&home, "ecb");
     // Clamping a --from after the last day would render days the user
     // never asked for (the weekend-only live-tail range relies on this),
-    // so the error keeps the requested range but names the coverage.
+    // so the error names the coverage instead of an inverted interval.
     let out = run(
         &home,
         &[
@@ -1007,12 +1007,32 @@ fn chart_from_after_coverage_errors_with_coverage_context() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains(
-            "no historical rates between 2030-01-01 and 2025-01-06 \
-             (history covers 2025-01-02 to 2025-01-06)"
-        ),
+        stderr.contains("no historical rates on or after 2030-01-01 (history ends 2025-01-06)"),
         "{stderr}"
     );
+    // Same with an explicit --to beyond the coverage: the clamp must not
+    // surface as a `between {from} and {to}` error with from > to.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2030-01-01",
+            "--to",
+            "2030-06-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no historical rates on or after 2030-01-01 (history ends 2025-01-06)"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("between"), "{stderr}");
 }
 
 #[test]

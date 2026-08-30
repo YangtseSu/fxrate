@@ -573,6 +573,15 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
         }
         _ => None,
     };
+    // The `--to` clamp above can invert the range when `--from` sits past
+    // the covered history and the live tail cannot serve it: fail with a
+    // factual message instead of the inverted `between {from} and {to}`.
+    if from > to {
+        return Err(boxed_error(format!(
+            "no historical rates on or after {from} (history ends {})",
+            coverage.end
+        )));
+    }
 
     let universe = history::date_universe(&conn, provider, from, to)
         .map_err(|error| boxed_error(format!("failed to read historical rates: {error}")))?;
