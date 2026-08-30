@@ -257,31 +257,32 @@ fn import_ecb_history(
     // row stays cheap even for a few hundred thousand upserts.
     pb.set_length(rows.len() as u64);
     pb.set_message("Importing rates into history database");
-    {
-        let tx = conn.transaction()?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(provider, date, quote)
-                 DO UPDATE SET rate = excluded.rate, fetched_at = excluded.fetched_at",
-            )?;
-            for (date, quote, rate) in &rows {
-                stmt.execute(params![
-                    provider.name(),
-                    date.to_string(),
-                    quote,
-                    rate,
-                    fetched_at
-                ])?;
-                pb.inc(1);
-            }
-        }
-        tx.commit()?;
-    }
     let start = rows.iter().map(|row| row.0).min().expect("rows non-empty");
     let end = rows.iter().map(|row| row.0).max().expect("rows non-empty");
-    upsert_coverage(conn, provider, start, end, &fetched_at)?;
+    // Rates and coverage are written in one transaction so a crash cannot
+    // leave the imported rows behind with a stale coverage range (which
+    // would force a redundant re-download on the next sync).
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO historical_rates (provider, date, quote, rate, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider, date, quote)
+             DO UPDATE SET rate = excluded.rate, fetched_at = excluded.fetched_at",
+        )?;
+        for (date, quote, rate) in &rows {
+            stmt.execute(params![
+                provider.name(),
+                date.to_string(),
+                quote,
+                rate,
+                fetched_at
+            ])?;
+            pb.inc(1);
+        }
+    }
+    upsert_coverage(&tx, provider, start, end, &fetched_at)?;
+    tx.commit()?;
     Ok((start, end))
 }
 
