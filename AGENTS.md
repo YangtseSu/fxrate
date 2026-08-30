@@ -117,7 +117,8 @@ fxrate chart [options] SOURCE TARGET
 `fxrate chart SOURCE TARGET` plots `1 SOURCE = x TARGET` over a date range using ECB historical reference rates (charts are always EUR-based cross rates; the convert command and its providers are unaffected).
 
 - `--from <date>` / `--to <date>` — inclusive `YYYY-MM-DD` bounds (default: earliest available data / the last ECB day, extended to the live snapshot date under the live-tail rule).
-  Invalid dates or `from > to` are usage errors (exit 2)
+  Invalid dates or `from > to` are usage errors (exit 2).
+  A single bound reaching past the covered history is clamped to it with a stderr note (`no ECB rates before/after …`); a `--to` before the first day is a runtime error (exit 1); a `--from` after the last day is a runtime error (exit 1) naming the covered range — clamping it would render days the user never asked for, and the weekend-only live-tail range relies on that. A clamped `--to` still lets the live tail extend the chart the way the default range does
 - `--format <csv|json|text|auto>` — `auto` (default): text chart when stdout is a terminal (or when `--output` is given), CSV otherwise.
   `csv`/`json` emit text (`date,rate` rows / `{source, target, points}`); `text` emits the text chart
 - `--output <path>` — write the chart to a file instead of stdout for every `--format` (`auto`/`text` get the text chart, `csv`/`json` their payload; the file never contains terminal escape sequences)
@@ -158,8 +159,7 @@ fxrate chart [options] SOURCE TARGET
 - stderr: notices and warnings (skipped currencies, invalid config, failed refresh fallback) and the history-sync progress spinner.
   `warning:` labels are yellow and `error:` labels are red when stderr is a TTY and `NO_COLOR` is unset or empty — gated independently of stdout, and plain when either stream is redirected
 - Chart: on startup, sync the ECB full history when the requested range is not covered by `history_coverage`, when there is no coverage at all, or with `-u/--update`.
-  A failed sync warns and falls back to cached data; exit 1 only when no local history exists.
-  Covered ranges never touch the network; the coverage check runs only when both `--from` and `--to` are given — a single bound is not separately validated and is clamped to the stored coverage
+  Covered ranges never touch the network; the coverage check runs only when both `--from` and `--to` are given — a single bound is not separately validated for syncing, only for the out-of-range clamps described under the chart options
   The live tail reads `rates.json` as-is — the chart never fetches live rates, so run the convert command first to refresh the snapshot; a missing or unreadable cache just disables the tail (a missing-currency splice prints a warning with the rates date and the chart ends at the last ECB day)
 - History syncs (chart first run, uncovered ranges, `-u`, and convert `--date` syncs) render an indicatif spinner on stderr showing the phase (download → parse → SQLite import with a row counter) and finish with the synced date range.
   It is terminal-only: indicatif hides it when stderr is not a user-attended TTY, so piped output, CI, and tests emit nothing

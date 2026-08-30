@@ -740,6 +740,154 @@ fn chart_stale_history_skips_live_tail() {
 }
 
 #[test]
+fn chart_clamps_out_of_range_single_bounds_with_notes() {
+    let home = temp_home("clamp");
+    seed_history(&home, "ecb");
+    // --from before the coverage starts: clamped up to the first day.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2024-06-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no ECB rates before 2025-01-02"),
+        "{stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("date,rate\n2025-01-02,"), "{stdout}");
+    // --to after the coverage ends: clamped down to the last day.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--to",
+            "2025-06-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no ECB rates after 2025-01-06"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout
+            .lines()
+            .last()
+            .unwrap_or("")
+            .starts_with("2025-01-06,"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn chart_from_after_coverage_errors_with_coverage_context() {
+    let home = temp_home("fromlate");
+    seed_history(&home, "ecb");
+    // Clamping a --from after the last day would render days the user
+    // never asked for (the weekend-only live-tail range relies on this),
+    // so the error keeps the requested range but names the coverage.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--from",
+            "2030-01-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "no historical rates between 2030-01-01 and 2025-01-06 \
+             (history covers 2025-01-02 to 2025-01-06)"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn chart_to_before_coverage_errors() {
+    let home = temp_home("toearly");
+    seed_history(&home, "ecb");
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--to",
+            "2024-01-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no historical rates on or before 2024-01-01 (history starts 2025-01-02)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn chart_to_clamped_beyond_coverage_still_reaches_live_tail() {
+    let home = temp_home("toclamp");
+    seed_history_jan10(&home);
+    seed_live_rates(&home, "2025-01-11");
+    // An explicit --to beyond the coverage is clamped with a note, but the
+    // live point still extends the chart the way the default range does.
+    let out = run(
+        &home,
+        &[
+            "chart",
+            "USD",
+            "CNY",
+            "--to",
+            "2025-06-01",
+            "--format",
+            "csv",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no ECB rates after 2025-01-10"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-11,7.3584905660377355"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn chart_missing_live_currency_warns_and_ends_at_ecb() {
     let home = temp_home("missinglive");
     seed_history_jan10(&home);

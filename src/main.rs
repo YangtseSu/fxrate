@@ -479,9 +479,43 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
     let Some(coverage) = coverage else {
         return Err(boxed_error("no historical rates available"));
     };
-    let from = from.unwrap_or(coverage.start);
+    // Clamp explicit bounds that only overhang the covered history, with a
+    // note — mirroring convert --date, where a date after the last ECB day
+    // falls back to it. A `--from` after the last day stays put: the live
+    // tail may still serve the range (a weekend-only one does), and clamping
+    // would render days the user never asked for; an empty intersection is a
+    // clear runtime error instead.
+    let from = match from {
+        Some(requested) if requested < coverage.start => {
+            eprintln!(
+                "{}",
+                style::warning(format!(
+                    "no ECB rates before {}; chart starts there",
+                    coverage.start
+                ))
+            );
+            coverage.start
+        }
+        Some(requested) => requested,
+        None => coverage.start,
+    };
     let to_explicit = to.is_some();
     let mut to = to.unwrap_or(coverage.end);
+    if to < coverage.start {
+        return Err(boxed_error(format!(
+            "no historical rates on or before {to} (history starts {})",
+            coverage.start
+        )));
+    }
+    let mut to_clamped = false;
+    if to > coverage.end {
+        eprintln!(
+            "{}",
+            style::warning(format!("no ECB rates after {}", coverage.end))
+        );
+        to = coverage.end;
+        to_clamped = true;
+    }
 
     // Live tail: when the cached snapshot's rate date reaches the last ECB
     // day (replacing that point) or extends past it (appending a new
@@ -499,9 +533,11 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
                 && live_date >= coverage.end
                 && live_date - coverage.end <= chrono::Duration::days(LIVE_TAIL_MAX_GAP_DAYS) =>
         {
-            // The default range extends to the live date; an explicit
-            // `--to` caps the range, so a live date beyond it is skipped.
-            if !to_explicit && live_date > to {
+            // The default range — and an explicit `--to` clamped down to
+            // the coverage — extends to the live date; an explicit `--to`
+            // inside the coverage caps the range, so a live date beyond it
+            // is skipped.
+            if (!to_explicit || to_clamped) && live_date > to {
                 to = live_date;
             }
             if live_date > to {
@@ -531,7 +567,8 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
         .map_err(|error| boxed_error(format!("failed to read historical rates: {error}")))?;
     if universe.is_empty() && live_splice.is_none() {
         return Err(boxed_error(format!(
-            "no historical rates between {from} and {to}"
+            "no historical rates between {from} and {to} (history covers {} to {})",
+            coverage.start, coverage.end
         )));
     }
     let load_series = |quote: &str| -> Result<Vec<series::Point>, Box<dyn Error>> {
