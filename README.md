@@ -12,7 +12,7 @@ offline after the first sync.
 - `-u` / `--update` to force a refresh
 - `-p` / `--provider <name>` to choose between the built-in rate providers
 - Multi-currency view: always shown when no targets are given; optionally appended after explicit targets (`multi_view` config, default on)
-- Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day
+- Historical conversion: `--date <YYYY-MM-DD>` converts at the ECB historical rate for that day; weekends/holidays fall back to the previous business day, and dates past the available history fall back to the latest known day without re-downloading
 - Historical charts (`fxrate chart`) from ECB reference rates: a stats panel
   (current, high/low with dates, change, average, volatility) above a
   fixed-size text chart (textplots), plus CSV/JSON output

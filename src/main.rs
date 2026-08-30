@@ -337,7 +337,14 @@ fn run_convert_historical(args: ConvertArgs, date: NaiveDate) -> Result<(), Box<
         .map_err(|error| boxed_error(format!("failed to open history database: {error}")))?;
     let covered = history::coverage_covers(&conn, provider, date, date)
         .map_err(|error| boxed_error(format!("failed to check history coverage: {error}")))?;
-    if args.force || !covered {
+    // A date outside the covered range can never be filled by a re-download:
+    // the ECB publishes no future rates, and each sync imports the same full
+    // history, so a date before the covered start stays uncovered too. Skip
+    // the full-CSV sync and let prev_trading_day resolve locally. -u syncs.
+    let outside_coverage = history::coverage_range(&conn, provider)
+        .map_err(|error| boxed_error(format!("failed to check history coverage: {error}")))?
+        .is_some_and(|coverage| date > coverage.end || date < coverage.start);
+    if args.force || (!covered && !outside_coverage) {
         match history::sync_history(&mut conn, provider) {
             Ok(_) => {}
             Err(error) if !covered => {

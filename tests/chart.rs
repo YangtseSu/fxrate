@@ -236,6 +236,68 @@ fn convert_date_weekend_uses_previous_business_day() {
 }
 
 #[test]
+fn convert_date_beyond_coverage_skips_sync() {
+    let home = temp_home("conv-date-future");
+    seed_history(&home, "ecb");
+    // 2030-01-01 is past the covered range; the ECB publishes no future
+    // rates, so no download is attempted (the blocked proxy would fail it)
+    // and the rate falls back to the latest local day, 2025-01-06.
+    let out = run(&home, &["--date", "2030-01-01", "100", "USD", "CNY"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("$100.00 USD =") && stdout.contains("731.04 CNY"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("rates date 2025-01-06"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no ECB rate for 2030-01-01; using 2025-01-06"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("failed to update historical rates"),
+        "unexpected sync attempt: {stderr}"
+    );
+}
+
+#[test]
+fn convert_date_beyond_coverage_with_force_still_syncs() {
+    let home = temp_home("conv-date-future-force");
+    seed_history(&home, "ecb");
+    let out = run(&home, &["-u", "--date", "2030-01-01", "100", "USD", "CNY"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no historical rates available for 2030-01-01"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn convert_date_before_coverage_skips_sync() {
+    let home = temp_home("conv-date-ancient");
+    seed_history(&home, "ecb");
+    // 2020-01-01 predates the covered range; every sync imports the same
+    // full history, so no download could cover it and none is attempted.
+    let out = run(&home, &["--date", "2020-01-01", "100", "USD", "CNY"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no historical rates available on or before 2020-01-01"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("failed to update historical rates"),
+        "unexpected sync attempt: {stderr}"
+    );
+}
+
+#[test]
 fn chart_csv_matches_cross_rates_offline() {
     let home = temp_home("csv");
     seed_history(&home, "ecb");
