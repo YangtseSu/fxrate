@@ -96,11 +96,7 @@ fn parse_convert_args(args: &[String]) -> Result<Command, i32> {
             .iter()
             .any(|provider| provider.name() == name.to_ascii_lowercase())
         {
-            let valid = Provider::CONVERT_PROVIDERS
-                .iter()
-                .map(|provider| provider.name())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let valid = Provider::names(&Provider::CONVERT_PROVIDERS);
             eprintln!(
                 "{}",
                 style::error(format!("unknown provider {name:?} (valid: {valid})"))
@@ -238,11 +234,7 @@ fn parse_chart_args(args: &[String]) -> Result<Command, i32> {
             .iter()
             .any(|provider| provider.name() == name.to_ascii_lowercase())
         {
-            let valid = Provider::CHART_PROVIDERS
-                .iter()
-                .map(|provider| provider.name())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let valid = Provider::names(&Provider::CHART_PROVIDERS);
             eprintln!(
                 "{}",
                 style::error(format!(

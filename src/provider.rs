@@ -27,6 +27,15 @@ impl Provider {
         }
     }
 
+    /// Comma-separated names of `providers`, for "valid: …" error messages.
+    pub fn names(providers: &[Provider]) -> String {
+        providers
+            .iter()
+            .map(|provider| provider.name())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     /// Providers accepted by the convert command (`-p/--provider`).
     pub const CONVERT_PROVIDERS: [Provider; 2] = [Provider::Frankfurter, Provider::ExchangeApi];
 
@@ -63,5 +72,14 @@ mod tests {
     #[test]
     fn chart_providers_are_ecb_only() {
         assert_eq!(Provider::CHART_PROVIDERS, [Provider::Ecb]);
+    }
+
+    #[test]
+    fn names_lists_convert_providers_for_messages() {
+        assert_eq!(
+            Provider::names(&Provider::CONVERT_PROVIDERS),
+            "frankfurter, exchange-api"
+        );
+        assert_eq!(Provider::names(&Provider::CHART_PROVIDERS), "ecb");
     }
 }

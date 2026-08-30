@@ -84,8 +84,9 @@ fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn Error>> {
                 eprintln!(
                     "{}",
                     style::warning(format!(
-                        "invalid provider {:?} in config, falling back to frankfurter",
-                        config.provider()
+                        "invalid provider {:?} in config, falling back to frankfurter (valid: {})",
+                        config.provider(),
+                        Provider::names(&Provider::CONVERT_PROVIDERS)
                     ))
                 );
                 Provider::Frankfurter
