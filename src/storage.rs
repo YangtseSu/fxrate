@@ -122,6 +122,15 @@ pub fn save_json<T: Serialize>(path: &Path, value: &T, atomic: bool) -> Result<(
             file.sync_all()?;
         }
         fs::rename(temp, path)?;
+        // Make the rename itself durable by fsyncing the parent directory,
+        // so a power cut cannot lose the directory entry. Best-effort: some
+        // filesystems reject directory fsync, and that must not fail the
+        // save.
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
     } else {
         fs::write(path, bytes)?;
     }
