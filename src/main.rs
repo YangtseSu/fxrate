@@ -45,8 +45,13 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn Error> {
 }
 
 /// Largest allowed gap in days between the last ECB day and the live
-/// snapshot date for the chart's live tail: a weekend plus one holiday.
-const LIVE_TAIL_MAX_GAP_DAYS: i64 = 4;
+/// snapshot date for the chart's live tail. The full ECB history has
+/// never had a publish gap beyond 5 days (two consecutive holidays plus
+/// a weekend: Easter every year, some Christmas/New-Year breaks), and
+/// the extra day covers a snapshot dated the next publishing morning,
+/// before the ECB has fixed that day's rates. A larger gap means the
+/// cached history is stale.
+const LIVE_TAIL_MAX_GAP_DAYS: i64 = 5;
 
 fn main() {
     let command = match cli::parse_args() {
@@ -522,8 +527,9 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
     // point), the point comes from rates.json — the same EUR-based cross
     // math the convert command uses — so the chart's right edge matches
     // convert. The snapshot date must be within LIVE_TAIL_MAX_GAP_DAYS of
-    // the last ECB day: a weekend plus one holiday is the largest plausible
-    // gap, and anything larger means the history is stale, so no splice.
+    // the last ECB day: 5 days is the largest gap the ECB calendar has
+    // ever produced (two-holiday weekends), and anything larger means the
+    // history is stale, so no splice.
     let live_date = snapshot
         .as_ref()
         .and_then(|snapshot| NaiveDate::parse_from_str(&snapshot.date, "%Y-%m-%d").ok());

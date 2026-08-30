@@ -121,8 +121,9 @@ compact label-free chart on terminals shorter than 22 rows, and the box is color
 (green/red change, bright-black chrome) only on a
 terminal — `NO_COLOR` disables it, and file/pipe output is always plain.
 Charts have no data for weekends/holidays and are never interpolated. When
-the range reaches the live snapshot's date — within a weekend-plus-one-
-holiday gap after the last ECB day — that day's point comes from `rates.json`
+the range reaches the live snapshot's date — within 5 days of the last ECB
+day (the longest ECB publish gap: two consecutive holidays plus a weekend,
+e.g. Easter) — that day's point comes from `rates.json`
 (the same EUR-based cross math the convert command uses), so the chart's
 right edge matches `fxrate` convert; the default range extends to it. A
 snapshot dated further back, or a currency missing from it, leaves the chart

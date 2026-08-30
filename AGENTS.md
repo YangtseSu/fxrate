@@ -40,8 +40,9 @@ All conversions are computed offline from the base-EUR snapshot: `amount * rate[
 - Chart data split: history comes from `history.db` (ECB); the live tail — the point at the cached snapshot's
   `rates.json` date — comes from the rates cache so the chart's right edge matches the convert command.
   When that date is on the last ECB day the ECB point is replaced; when it is after (weekend/holiday) a point
-  is appended and the default range extends to it. The snapshot date must be within 4 days of the last ECB day
-  (a weekend plus one holiday); a larger gap means the history is stale and no splice happens. A snapshot dated
+  is appended and the default range extends to it. The snapshot date must be within 5 days of the last ECB day
+  (the largest recurring ECB publish gap — two consecutive holidays plus a weekend, e.g. Easter — plus one
+  unpublished morning); a larger gap means the history is stale and no splice happens. A snapshot dated
   before the last ECB day or a currency missing from the snapshot (warned on stderr) also disables the tail.
   The chart never fetches live rates: it reads `rates.json` as-is (refresh it by running the convert command).
 - On first chart use (or when the requested `--from`/`--to` range is not covered, or with `-u/--update`) the full CSV is downloaded and upserted in a transaction (sync/fallback/error policy is under **Behavior**)
@@ -213,7 +214,7 @@ Re-pushing those tags is not a fix: GitHub runs the `release.yml` stored at the 
 
 - Run the full suite with `cargo test --locked` (module unit tests plus `tests/chart.rs` integration tests, which are fully offline: they seed `rates.json` / `history.db` into a fresh XDG home and block the network with `HTTPS_PROXY=http://127.0.0.1:9`). The one exception is `current.rs`, whose unit tests serve canned HTTP responses on a random localhost port — they scrub proxy env vars first so a developer's `HTTP_PROXY` cannot redirect even localhost
 - Offline paths: seed a handcrafted `rates.json` (set `fetched_at` to a stale time), include the cached provider when testing provider switching, and block the network, e.g. `HTTPS_PROXY=http://127.0.0.1:9` — refresh fails and the cache fallback is exercised
-- Chart live tail: seed `rates.json` dated on/after the coverage end (e.g. a Saturday after a Friday) and assert the appended/replaced row equals the snapshot's `rate[target] / rate[source]`; a snapshot more than 4 days after the last ECB day (stale history) must not splice; a currency missing from the snapshot warns on stderr and the chart ends at the last ECB day; a weekend-only range with a snapshot prints the single-day row
+- Chart live tail: seed `rates.json` dated on/after the coverage end (e.g. a Saturday after a Friday) and assert the appended/replaced row equals the snapshot's `rate[target] / rate[source]`; a snapshot more than 5 days after the last ECB day (stale history) must not splice; a currency missing from the snapshot warns on stderr and the chart ends at the last ECB day; a weekend-only range with a snapshot prints the single-day row
 - Historical `--date` convert: a covered date reuses the cache with no network; an uncovered date tries a sync then exits 1 when no local history exists; a weekend/holiday date falls back to the previous business day (noted on stderr, rate date shown is that day); ECB EUR-based cross math matches `chart`
 - Fresh XDG dirs simulate a first run: config auto-creation, no-cache failure, and no-history failure (chart exits 1 with no local data)
 - When changing related behavior, exercise fresh-cache reuse, stale-cache refresh, provider-change refresh, explicit-first ordering/dedup, offline fallback math, force-update failure, interval handling, invalid config, usage errors, chart coverage/upsert/provider isolation, ECB CSV parsing (N/A, old currency columns, trailing commas), EUR cross rates, single-day charts, and empty ranges

@@ -665,6 +665,31 @@ fn chart_default_range_extends_to_live_saturday() {
 }
 
 #[test]
+fn chart_live_tail_at_max_gap_splices() {
+    let home = temp_home("maxgaptail");
+    seed_history_jan10(&home);
+    // 2025-01-15 is five days after the last ECB day (2025-01-10): the
+    // largest gap the ECB calendar produces (a two-holiday weekend like
+    // Easter), so the live point is still spliced in and the default
+    // range extends to it.
+    seed_live_rates(&home, "2025-01-15");
+    let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.lines().last(),
+        Some("2025-01-15,7.3584905660377355"),
+        "{stdout}"
+    );
+    // The ECB day before the tail keeps its own value.
+    assert!(stdout.contains("2025-01-10,7.314285714285714"), "{stdout}");
+}
+
+#[test]
 fn chart_live_point_replaces_last_ecb_day() {
     let home = temp_home("livereplace");
     seed_history_jan10(&home);
@@ -724,10 +749,10 @@ fn chart_single_live_day_prints_one_row() {
 fn chart_stale_history_skips_live_tail() {
     let home = temp_home("staletail");
     seed_history(&home, "ecb");
-    // Snapshot eleven days after the last ECB day: beyond the weekend
-    // plus one holiday gap, so the history is treated as stale and the
-    // live point is not spliced in.
-    seed_live_rates(&home, "2025-01-17");
+    // Snapshot six days after the last ECB day (2025-01-06): beyond the
+    // five-day ECB publish-gap maximum, so the history is treated as
+    // stale and the live point is not spliced in.
+    seed_live_rates(&home, "2025-01-12");
     let out = run(&home, &["chart", "USD", "CNY", "--format", "csv"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -736,7 +761,7 @@ fn chart_stale_history_skips_live_tail() {
         Some("2025-01-06,7.310397700047915"),
         "{stdout}"
     );
-    assert!(!stdout.contains("2025-01-17"), "{stdout}");
+    assert!(!stdout.contains("2025-01-12"), "{stdout}");
 }
 
 #[test]
