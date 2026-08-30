@@ -29,11 +29,6 @@ jobs:
             runner: macos-14
             target: aarch64-apple-darwin
             binary: fxrate
-          - os: windows
-            arch: amd64
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary: fxrate.exe
     steps:
       - uses: actions/checkout@v7
 
@@ -55,18 +50,10 @@ jobs:
         run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Stage Unix binary
-        if: matrix.os != 'windows'
         shell: bash
         run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/fxrate-${{ matrix.os }}-${{ matrix.arch }}"
-
-      - name: Stage Windows binary
-        if: matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/fxrate-${{ matrix.os }}-${{ matrix.arch }}.exe"
 
       - uses: actions/upload-artifact@v7
         with:

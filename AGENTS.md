@@ -191,7 +191,7 @@ Commit it as `release: set crate version to X.Y.Z` and push — the tag points a
 
 1. **Tag first, PKGBUILD after.** The tag points at the last code commit on main; the PKGBUILD bump is a follow-up commit.
    This order is required: the PKGBUILD's `source` is GitHub's archive of the tag, so its sha256 can only be computed after the tag exists
-2. `git tag vX.Y.Z && git push origin vX.Y.Z` — pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the four platform binaries.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` — pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the platform binaries (Linux x86_64/aarch64 and macOS aarch64; no Windows builds).
    A new GitHub release gets auto-generated notes; an existing release has its assets updated
 
 GitHub access: when `gh` is available, prefer it for everything GitHub — `gh` for viewing (runs, releases, repos), and `gh auth setup-git` so `git push` goes over HTTPS through the gh credential helper (SSH on port 22 is often blocked on restricted networks; `gh auth login --web` stores the token in the system keyring).
