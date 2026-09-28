@@ -1,5 +1,12 @@
 # fxrate
 
+[![Vibe Coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A4%96-8A2BE2)](#how-this-was-built)
+[![Release](https://img.shields.io/github/v/release/YangtseSu/fxrate?sort=semver&label=release)](https://github.com/YangtseSu/fxrate/releases/latest)
+[![CI](https://github.com/YangtseSu/fxrate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YangtseSu/fxrate/actions/workflows/ci.yml)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-2b866d?logo=rust)](https://www.rust-lang.org)
+[![AUR](https://img.shields.io/aur/version/fxrate?label=AUR&logo=archlinux&logoColor=1793d1)](https://aur.archlinux.org/packages/fxrate)
+
 Offline currency conversion CLI with local rate caching, so conversions
 continue to work without network access once rates are available. Also
 plots historical exchange-rate charts from ECB reference rates, fully
@@ -177,6 +184,20 @@ updated once per working day. The full history is synced into `history.db`
 on first use and only re-downloaded when a requested range is not covered
 or with `-u/--update`. Missing entries and old currency columns are handled
 automatically.
+
+## How this was built
+
+This repository was developed with an AI coding agent. A human set the
+requirements, reviewed each change, and verified every claim against a real
+run of the tool; the code was written largely by the agent. The working
+conventions live in `AGENTS.md`.
+
+Two things keep that honest. The integration suite (`tests/chart.rs`) runs
+the real binary against seeded XDG directories with the network blocked, so
+its assertions pin observable behavior rather than internal detail; and
+`AGENTS.md` records the contracts — the live-tail splice rules, the storage
+layout, the exit codes — so a later change has to argue with them rather than
+quietly break them.
 
 ## License
 
