@@ -184,6 +184,7 @@ fxrate chart [options] SOURCE TARGET
 - A commit made by an AI for code it wrote carries a 🤖 marker at the very end of the title: `feat(chart): splice the live tail point 🤖`
   One space before the marker, nothing after it — the title's own text, prefix, and trailing punctuation stay as the convention would have them
 - A commit the human wrote carries no marker; mixed commits (agent code plus a human's manual edits) are marked, and an agent's follow-up `style:`/`packaging:` commits are marked too
+- Pushing requires explicit permission: never `git push` to any remote (`origin`, the AUR, tag pushes included) unless the user asked for that push in the current conversation; changing or committing files is not permission to push
 
 ## Releasing
 
@@ -202,21 +203,21 @@ GitHub access: when `gh` is available, prefer it for everything GitHub — `gh` 
 Note: `gh` reads `$XDG_CONFIG_HOME` — do not run it with a test home's XDG vars exported in the same shell.
 
 3. Download the tag archive and compute the checksum: `curl -fsSLo /tmp/fxrate.tar.gz https://github.com/YangtseSu/fxrate/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/fxrate.tar.gz` — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD downloads from GitHub)
-4. Update the AUR PKGBUILD (checked out at `~/aur/fxrate`, remote `ssh://aur@aur.archlinux.org/fxrate.git`; the PKGBUILD is not part of this repository):
+4. Update the AUR PKGBUILD (clone `ssh://aur@aur.archlinux.org/fxrate.git`; the PKGBUILD is not part of this repository):
 
 - `pkgver=X.Y.Z`, `pkgrel=1` (resets to 1 on every new version)
 - `sha256sums=('<new hash>')` — single entry, replaced in full
 - Leave everything else (pkgname, arch, source URL pattern, build/check/ package functions) untouched
 
 5. Regenerate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`), then in a scratch dir holding a copy of the checkout run `makepkg -o` (checksum check) and a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
-6. Commit and push to the AUR (`git commit && git push` in `~/aur/fxrate`)
+6. Commit and push to the AUR (`git commit && git push` in the AUR checkout)
 7. Optionally publish the Arch package on the release. Build it with baseline CFLAGS — CachyOS's `/etc/makepkg.conf` sets `-march=native`, which would pin the package to the maintainer's CPU (copy the config and replace `-march=native` with `-march=x86-64`; CachyOS also enables the `debug` option, whose `fxrate-debug` split package is not published):
    `makepkg --config makepkg-baseline.conf` in a scratch dir holding a copy of the AUR PKGBUILD (keep the checkout clean of `src/`/`pkg/` build artifacts)
    Then upload and refresh `checksums.txt` so it covers every asset (run `gh` with `-R YangtseSu/fxrate` outside a git checkout):
    `gh release upload -R YangtseSu/fxrate v0.5.2 fxrate-0.5.2-1-x86_64.pkg.tar.zst --clobber`, then re-download all assets, drop the old `checksums.txt`, regenerate it with `sha256sum -- *`, and upload it with `--clobber`.
    The aarch64 package cannot be built on the x86_64 workstation; it is currently release-only-absent (the CI attempt failed: `archlinux:base-devel` on Docker Hub ships no arm64 manifest).
 
-The PKGBUILD is maintained in the AUR (`https://aur.archlinux.org/packages/fxrate`, git `ssh://aur@aur.archlinux.org/fxrate.git`, local checkout `~/aur/fxrate`), not in this repository or its tagged trees.
+The PKGBUILD is maintained in the AUR (`https://aur.archlinux.org/packages/fxrate`, git `ssh://aur@aur.archlinux.org/fxrate.git`), not in this repository or its tagged trees.
 Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `depends=('glibc' 'libgcc')`, `makedepends=('rust')`, `source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
 
 Repository rename (done): `gh repo rename fxrate` moved `YangtseSu/huobi` to `YangtseSu/fxrate`; `origin` points at the new SSH URL and GitHub redirects the old name.
