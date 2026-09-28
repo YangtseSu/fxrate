@@ -181,6 +181,9 @@ fxrate chart [options] SOURCE TARGET
 - If none of the explicit targets are valid, the multi-currency view is shown as a fallback (same rule as "no targets given")
 - Invalid config values degrade to defaults with a warning, never a crash; missing or empty `update_interval` is the documented default case
 - Currency codes are case-insensitive and normalized to uppercase in memory; the existing config file is not rewritten during normalization
+- A commit made by an AI for code it wrote carries a 🤖 marker at the very end of the title: `feat(chart): splice the live tail point 🤖`
+  One space before the marker, nothing after it — the title's own text, prefix, and trailing punctuation stay as the convention would have them
+- A commit the human wrote carries no marker; mixed commits (agent code plus a human's manual edits) are marked, and an agent's follow-up `style:`/`packaging:` commits are marked too
 
 ## Releasing
 
