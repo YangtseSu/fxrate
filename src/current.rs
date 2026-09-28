@@ -324,7 +324,10 @@ mod tests {
             "ALL_PROXY",
             "all_proxy",
         ] {
-            std::env::remove_var(variable);
+            // SAFETY: test-only scrub, run before any HTTP client in this
+            // binary reads the environment; the proxy variables are not
+            // touched concurrently elsewhere in the test binary.
+            unsafe { std::env::remove_var(variable) };
         }
     }
 

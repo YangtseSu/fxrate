@@ -134,16 +134,16 @@ fn parse_convert_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Comm
             _ => positional.push(arg.clone()),
         }
     }
-    if let Some(name) = &provider {
-        if !Provider::accepted(name, &Provider::CONVERT_PROVIDERS) {
-            let valid = Provider::names(&Provider::CONVERT_PROVIDERS);
-            eprintln!(
-                "{}",
-                style::error(format!("unknown provider {name:?} (valid: {valid})"))
-            );
-            usage();
-            return Err(2);
-        }
+    if let Some(name) = &provider
+        && !Provider::accepted(name, &Provider::CONVERT_PROVIDERS)
+    {
+        let valid = Provider::names(&Provider::CONVERT_PROVIDERS);
+        eprintln!(
+            "{}",
+            style::error(format!("unknown provider {name:?} (valid: {valid})"))
+        );
+        usage();
+        return Err(2);
     }
     if positional.len() < 2 {
         usage();
@@ -273,18 +273,18 @@ fn parse_chart_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Comman
             _ => positional.push(arg.clone()),
         }
     }
-    if let Some(name) = &provider {
-        if !Provider::accepted(name, &Provider::CHART_PROVIDERS) {
-            let valid = Provider::names(&Provider::CHART_PROVIDERS);
-            eprintln!(
-                "{}",
-                style::error(format!(
-                    "unknown provider {name:?} for chart (valid: {valid})"
-                ))
-            );
-            chart_usage();
-            return Err(2);
-        }
+    if let Some(name) = &provider
+        && !Provider::accepted(name, &Provider::CHART_PROVIDERS)
+    {
+        let valid = Provider::names(&Provider::CHART_PROVIDERS);
+        eprintln!(
+            "{}",
+            style::error(format!(
+                "unknown provider {name:?} for chart (valid: {valid})"
+            ))
+        );
+        chart_usage();
+        return Err(2);
     }
     if positional.len() < 2 {
         chart_usage();
@@ -298,15 +298,15 @@ fn parse_chart_args<'a>(args: impl Iterator<Item = &'a String>) -> Result<Comman
         chart_usage();
         return Err(2);
     }
-    if let (Some(from), Some(to)) = (from, to) {
-        if from > to {
-            eprintln!(
-                "{}",
-                style::error(format!("--from {from} must not be after --to {to}"))
-            );
-            chart_usage();
-            return Err(2);
-        }
+    if let (Some(from), Some(to)) = (from, to)
+        && from > to
+    {
+        eprintln!(
+            "{}",
+            style::error(format!("--from {from} must not be after --to {to}"))
+        );
+        chart_usage();
+        return Err(2);
     }
     Ok(Command::Chart(ChartArgs {
         force,

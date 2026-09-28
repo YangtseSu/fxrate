@@ -7,7 +7,7 @@ use chrono::{Datelike, NaiveDate};
 use textplots::{Chart, LabelBuilder, LabelFormat, Plot, Shape, TickDisplay, TickDisplayBuilder};
 use unicode_width::UnicodeWidthStr;
 
-use crate::series::{stats as series_stats, Point, Stats};
+use crate::series::{Point, Stats, stats as series_stats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -934,9 +934,11 @@ mod tests {
         assert_eq!(lines.len(), 6);
         assert!(!has_braille(&tiny));
         assert_eq!(lines[5].chars().count(), 40);
-        assert!(lines[5]
-            .chars()
-            .all(|c| ('\u{2581}'..='\u{2588}').contains(&c)));
+        assert!(
+            lines[5]
+                .chars()
+                .all(|c| ('\u{2581}'..='\u{2588}').contains(&c))
+        );
         // 23 rows is still too short (panel + 15 + 2 axis lines + 2 spare)
         let tight = render_text(&points, "USD", "CNY", 80, 23, false, None);
         assert_eq!(tight.lines().count(), 14);

@@ -471,12 +471,9 @@ fn run_chart(args: ChartArgs) -> Result<(), Box<dyn Error>> {
     let mut coverage = history::coverage_range(&conn, provider)
         .map_err(|error| boxed_error(format!("failed to read history coverage: {error}")))?;
     let mut need_sync = force || coverage.is_none();
-    if !need_sync {
-        if let (Some(from), Some(to)) = (from, to) {
-            need_sync = !history::coverage_covers(&conn, provider, from, to).map_err(|error| {
-                boxed_error(format!("failed to check history coverage: {error}"))
-            })?;
-        }
+    if !need_sync && let (Some(from), Some(to)) = (from, to) {
+        need_sync = !history::coverage_covers(&conn, provider, from, to)
+            .map_err(|error| boxed_error(format!("failed to check history coverage: {error}")))?;
     }
     if need_sync {
         match history::sync_history(&mut conn, provider) {
@@ -816,10 +813,12 @@ mod tests {
         );
         assert!(lines[0].contains("\u{1b}[1m")); // bold amounts
         assert!(lines[0].contains("709.09"));
-        assert!(lines
-            .last()
-            .unwrap()
-            .contains("\u{1b}[90mrates updated: 2026-08-28"));
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .contains("\u{1b}[90mrates updated: 2026-08-28")
+        );
     }
 
     #[test]

@@ -7,13 +7,13 @@
 
 use chrono::{NaiveDate, Utc};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::error::Error;
 use std::fs;
 use std::io::Read;
 use std::time::Duration;
 
-use crate::current::{get_bytes, MAX_HISTORY_RESPONSE_SIZE};
+use crate::current::{MAX_HISTORY_RESPONSE_SIZE, get_bytes};
 use crate::provider::Provider;
 use crate::storage::history_db_path;
 

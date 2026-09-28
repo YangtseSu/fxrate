@@ -587,9 +587,11 @@ fn chart_text_format_renders_braille_chart() {
     assert!(stdout.contains("Volatility:"));
     // Piped stdout is not a terminal: colors must stay off.
     assert!(!stdout.contains('\u{1b}'));
-    assert!(stdout
-        .chars()
-        .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
+    assert!(
+        stdout
+            .chars()
+            .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c))
+    );
     assert!(stdout.contains("2025-01-02"));
     assert!(stdout.contains("2025-01-06"));
 }
