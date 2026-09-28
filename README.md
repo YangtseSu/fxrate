@@ -28,13 +28,8 @@ Requires Rust and Cargo.
 cargo build --release --locked
 ```
 
-The binary is `target/release/fxrate`. Arch Linux users can build and install
-from `packaging/arch/`:
-
-```sh
-cd packaging/arch
-makepkg -si
-```
+The binary is `target/release/fxrate`. Arch Linux users can install the
+[fxrate](https://aur.archlinux.org/packages/fxrate) package from the AUR.
 
 ## Usage
 

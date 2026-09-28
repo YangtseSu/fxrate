@@ -192,7 +192,7 @@ Release flow for a new version:
 **Before tagging**: bump the version in `Cargo.toml`, then let cargo refresh `Cargo.lock`'s root entry (edit `Cargo.toml` and run `cargo check --offline`; a hand-edited lock risks mis-firing, and a stale lock breaks `--locked` builds).
 Commit it as `release: set crate version to X.Y.Z` and push — the tag points at that commit, so the release flow's step 1 comes after this one.
 
-1. **Tag first, PKGBUILD after.** The tag points at the last code commit on main; the PKGBUILD bump is a follow-up commit.
+1. **Tag first, PKGBUILD after.** The tag points at the last code commit on main; the PKGBUILD bump is a follow-up commit in the AUR repository.
    This order is required: the PKGBUILD's `source` is GitHub's archive of the tag, so its sha256 can only be computed after the tag exists
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` — pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the platform binaries (Linux x86_64/aarch64 and macOS aarch64; no Windows builds).
    A new GitHub release gets auto-generated notes; an existing release has its assets updated
@@ -202,22 +202,22 @@ GitHub access: when `gh` is available, prefer it for everything GitHub — `gh` 
 Note: `gh` reads `$XDG_CONFIG_HOME` — do not run it with a test home's XDG vars exported in the same shell.
 
 3. Download the tag archive and compute the checksum: `curl -fsSLo /tmp/fxrate.tar.gz https://github.com/YangtseSu/fxrate/archive/refs/tags/vX.Y.Z.tar.gz && sha256sum /tmp/fxrate.tar.gz` — hash the GitHub-served tarball, not a local `git archive` (the PKGBUILD downloads from GitHub)
-4. Update `packaging/arch/PKGBUILD`:
+4. Update the AUR PKGBUILD (checked out at `~/aur/fxrate`, remote `ssh://aur@aur.archlinux.org/fxrate.git`; the PKGBUILD is not part of this repository):
 
 - `pkgver=X.Y.Z`, `pkgrel=1` (resets to 1 on every new version)
 - `sha256sums=('<new hash>')` — single entry, replaced in full
 - Leave everything else (pkgname, arch, source URL pattern, build/check/ package functions) untouched
 
-5. Verify from `packaging/arch/` in a scratch dir: `makepkg -o` (checksum check), then a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
-6. Commit `packaging: bump PKGBUILD to vX.Y.Z` and push
+5. Regenerate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`), then in a scratch dir holding a copy of the checkout run `makepkg -o` (checksum check) and a full `makepkg` build to exercise `build`/`check`/`package` and confirm the produced `.pkg.tar.zst` contains `/usr/bin/fxrate` and the LICENSE
+6. Commit and push to the AUR (`git commit && git push` in `~/aur/fxrate`)
 7. Optionally publish the Arch package on the release. Build it with baseline CFLAGS — CachyOS's `/etc/makepkg.conf` sets `-march=native`, which would pin the package to the maintainer's CPU (copy the config and replace `-march=native` with `-march=x86-64`; CachyOS also enables the `debug` option, whose `fxrate-debug` split package is not published):
-   `makepkg --config makepkg-baseline.conf` in a scratch dir holding a copy of `packaging/arch/PKGBUILD` (keep the repo dir clean of `src/`/`pkg/` build artifacts)
+   `makepkg --config makepkg-baseline.conf` in a scratch dir holding a copy of the AUR PKGBUILD (keep the checkout clean of `src/`/`pkg/` build artifacts)
    Then upload and refresh `checksums.txt` so it covers every asset (run `gh` with `-R YangtseSu/fxrate` outside a git checkout):
    `gh release upload -R YangtseSu/fxrate v0.5.2 fxrate-0.5.2-1-x86_64.pkg.tar.zst --clobber`, then re-download all assets, drop the old `checksums.txt`, regenerate it with `sha256sum -- *`, and upload it with `--clobber`.
    The aarch64 package cannot be built on the x86_64 workstation; it is currently release-only-absent (the CI attempt failed: `archlinux:base-devel` on Docker Hub ships no arm64 manifest).
 
-The PKGBUILD lives at `packaging/arch/` on main, never in the tagged tree.
-Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `makedepends=('rust')`, `source=("$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
+The PKGBUILD is maintained in the AUR (`https://aur.archlinux.org/packages/fxrate`, git `ssh://aur@aur.archlinux.org/fxrate.git`, local checkout `~/aur/fxrate`), not in this repository or its tagged trees.
+Key fields: `arch=('x86_64' 'aarch64')`, `license=('GPL-3.0-only')`, `depends=('glibc' 'libgcc')`, `makedepends=('rust')`, `source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")`, `cargo build --release --locked` with `cargo test --locked` as the check step.
 
 Repository rename (done): `gh repo rename fxrate` moved `YangtseSu/huobi` to `YangtseSu/fxrate`; `origin` points at the new SSH URL and GitHub redirects the old name.
 Because GitHub names the archive's top directory after the repository, the `v0.4.1` tarball is now `fxrate-0.4.1/` and its hash differs from the pre-rename one — `sha256sums` in the PKGBUILD was re-recorded for it.
