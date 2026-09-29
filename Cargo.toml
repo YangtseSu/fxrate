@@ -1,9 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 [package]
 name = "fxrate"
 version = "0.5.2"
 edition = "2024"
 description = "Offline currency conversion CLI backed by Frankfurter or exchange-api rates"
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/YangtseSu/fxrate"
 
 [dependencies]

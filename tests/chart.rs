@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yangtse Su
 //
 // End-to-end tests: convert regression and chart command, all offline.

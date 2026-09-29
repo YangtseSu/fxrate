@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: CI
 
 on:
@@ -27,3 +30,9 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+      - name: Check REUSE compliance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reuse
+          reuse lint

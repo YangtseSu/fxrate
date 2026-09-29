@@ -1,9 +1,14 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # fxrate
 
 [![Vibe Coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A4%96-8A2BE2)](#how-this-was-built)
 [![Release](https://img.shields.io/github/v/release/YangtseSu/fxrate?sort=semver&label=release)](https://github.com/YangtseSu/fxrate/releases/latest)
 [![CI](https://github.com/YangtseSu/fxrate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YangtseSu/fxrate/actions/workflows/ci.yml)
-[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-2b866d?logo=rust)](https://www.rust-lang.org)
 [![AUR](https://img.shields.io/aur/version/fxrate?label=AUR&logo=archlinux&logoColor=1793d1)](https://aur.archlinux.org/packages/fxrate)
 
@@ -201,4 +206,5 @@ quietly break them.
 
 ## License
 
-GPLv3. See [LICENSE](LICENSE).
+GPLv3 or later. See [LICENSE](LICENSE) (mirrored as `LICENSES/GPL-3.0-or-later.txt`; the
+tree is [REUSE](https://reuse.software)-compliant).

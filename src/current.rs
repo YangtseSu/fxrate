@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yangtse Su
 //
 // Latest-rates fetching (Frankfurter / exchange-api) and conversion math.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yangtse Su
 //
 // Currency display metadata resolved from the ISO 4217 data in the
