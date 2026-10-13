@@ -128,7 +128,7 @@ fn extract_ecb_csv(zip_bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))?;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
-        if file.name() == CSV_ENTRY {
+        if file.name()? == CSV_ENTRY {
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)?;
             return Ok(bytes);
